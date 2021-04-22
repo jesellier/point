@@ -1,4 +1,7 @@
 import numpy as np
+import arrow
+import sys
+import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -12,7 +15,6 @@ from scipy.optimize import minimize #For optimizing
 from point.utils import check_random_state_instance
 from point.low_rank_gp import LowRankApproxGP
 
-import time
 
 
 
@@ -51,7 +53,7 @@ class Space():
         
     
 
-class HomogeneousSPP() :
+class HomogeneousSpatialPP() :
 
     def __init__(self, lam, random_state = None):
         super().__init__()
@@ -60,43 +62,14 @@ class HomogeneousSPP() :
         
     def generate(self, sp = Space()):
         random_state = check_random_state_instance(self.random_state)
-        numPoints = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure())[0]
-        X = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(numPoints, sp._bounds.shape[0]))
-        return X
+        n_points = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure())[0]
+        points = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(n_points, sp._bounds.shape[0]))
+        return points
     
     
     
     
-class InhomogeneousSPP() :
-    
-    def __init__(self, functor, random_state = None):
-        super().__init__()
-        self.fun_lambda = functor
-        self.lamMax = None
-        self.random_state = random_state
-        
-    def optimizeBound(self, sp):
-        resultsOpt=minimize(lambda x : - self.fun_lambda(x[0],x[1]), sp.center(), bounds=(sp.x1Bound(), sp.x2Bound()));
-        self.lambdaMax = - resultsOpt.fun; #retrieve minimum value found by minimize
-        
-        
-    def generate(self, sp = Space()):
-        
-        random_state = check_random_state_instance(self.random_state)
-        self.optimizeBound(sp)
-        
-        X  = HomogeneousSPP(self.lambdaMax * sp.measure(),  random_state = random_state ).generate(sp)
-        num = len(X)
-        
-        tmp = random_state .uniform(0,1, num)< self.fun_lambda(X[:,0], X[:,1])/self.lambdaMax 
-        x_thinned = X[~tmp]
-        x_points = X[tmp]
-
-        return x_points, x_thinned
-    
-    
-    
-class CoxLowRankSGP() :
+class CoxLowRankSpatialPP() :
     
     def __init__(self, length_scale, variance = 1.0, n_components = 10, random_state = None):
         super().__init__()
@@ -109,19 +82,18 @@ class CoxLowRankSGP() :
         out = self.lrgp_.func(tf.constant([x[0], x[1]], dtype=float_type))
         out = out[0][0]
         return out.numpy()
-
-
+    
+    def sample(self):
+        self.lrgp_.fit(self.length_scale, self.variance)
         
-    def optimizeBound(self, n_warm_up = 10000, n_iter = 30, sp = Space()):
+
+
+    def __optimizeBound(self, n_warm_up = 10000, n_iter = 30, sp = Space()):
         
         random_state = check_random_state_instance(self.random_state)
         bounds = sp._bounds
 
-        if not self.lrgp_.is_fitted :
-            self.lrgp_.fit(self.length_scale, self.variance)
-
         max_fun = 0
-
         # Warm up with random points
         if n_warm_up is not None and n_warm_up > 0 :
             x_tries = random_state.uniform(bounds[:, 0], bounds[:, 1], size=(n_warm_up, bounds.shape[0]))
@@ -156,57 +128,62 @@ class CoxLowRankSGP() :
     
     
         
-    def generate(self, sp = Space(), do_clipping = True):
+    def generate(self, sp = Space(), batch_size =1, do_clipping = True, verbose = True):
 
         random_state = check_random_state_instance(self.random_state)
-        self.optimizeBound(sp = sp) 
-
-        lambdaMax = self.lambdaMax
+        points_list = []
+        sizes = []
+        max_len = 0
         
-        X  = HomogeneousSPP(lambdaMax * sp.measure(), random_state= random_state ).generate(sp)
-        lambdas =  self.lrgp_.func(tf.constant(X, dtype=float_type))**2
+        for b in range(batch_size) :
+            self.sample()
+            self.__optimizeBound(sp = sp)
+            lambdaMax = self.lambdaMax
+            full_points  = HomogeneousSpatialPP(lambdaMax * sp.measure(), random_state= random_state ).generate(sp)
+            
+            lambdas =  self.lrgp_.func(tf.constant(full_points, dtype=float_type))**2
+            lambdas = lambdas.numpy()
+            n_lambdas = lambdas.shape[0]
+            
+            if do_clipping is True : lambdas = np.clip(lambdas, 0, lambdaMax)
+            
+            u = random_state.uniform(0, 1, n_lambdas)
+            tmp = (u < lambdas.reshape(n_lambdas)/lambdaMax)
+            retained_points = full_points[tmp]
+            #thinned = X[~tmp]
+            
+            n_points = retained_points.shape[0]
+            max_len = max(max_len , n_points)  
 
-        lambdas = lambdas.numpy()
-        n = lambdas.shape[0]
-        if do_clipping is True : lambdas = np.clip(lambdas, 0, lambdaMax)
-
-        u = random_state.uniform(0,1, n)
-        tmp = (u < lambdas.reshape(n)/lambdaMax)
-
-        x_thinned = X[~tmp]
-        x_points = X[tmp]
+            points_list.append(retained_points)
+            sizes.append(n_points)
+            
+            if verbose :
+                print("[%s] %d-th sequence generated: %d raw samples. %d samples have been retained. " % \
+                      (arrow.now(), b+1, n_lambdas, n_points), file=sys.stderr)
+                    
+        data = np.zeros((batch_size, max_len, 2))
+        for b in range(batch_size):
+            data[b, :points_list[b].shape[0]] = points_list[b]
         
-        return x_points, x_thinned
+        return data, sizes
+    
+    
+
+def print_points(x1, x2 = None):
+    plt.scatter(x1[:,0], x1[:,1], edgecolor='b', facecolor='none', alpha=0.5 );
+    
+    if x2 is not None :
+        plt.scatter(x2[:,0], x2[:,1], edgecolor='r', facecolor='none', alpha=0.5 );
         
+    plt.xlabel("x"); plt.ylabel("y");
+    plt.show();
+
+    
+
+    
+
+
         
-if __name__ == "__main__" :
-    
-    rng = np.random.RandomState(40)
-    
-    t0 = time.time()
-    sp = Space()
-    bounds = sp._bounds
-    variance = tf.Variable(100.0, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-
-    p = CoxLowRankSGP(length_scale=length_scale, variance = variance, random_state = rng)
-    x_points, x_thinned = p.generate()
-    #print(p.lrgp_.randombeta_)
-    #print(p.lrgp_.randomFourier_.random_weights_)
-    #print(p.lrgp_.randomFourier_.random_offset_)
-
-    
-    #print("FINAL:" + str(time.time()-t0))
-
-    #r1 = p.optimizeBound()
-    
-    #x_tries = rng.uniform(bounds[:, 0], bounds[:, 1], size=(10000, bounds.shape[0]))
-    #fs = p.lrgp_.func(tf.constant(x_tries, dtype=float_type))**2
-    #fs = fs.numpy()
-    #max_fun = fs.max()
-    #x_max = x_tries[fs.argmax()]
-    #print(p.lambdaMax)
-    
-    
     
     
