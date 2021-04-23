@@ -71,7 +71,7 @@ class HomogeneousSpatialPP() :
     
 class CoxLowRankSpatialPP() :
     
-    def __init__(self, length_scale, variance = 1.0, n_components = 10, random_state = None):
+    def __init__(self, length_scale, variance = 1.0, n_components = 100, random_state = None):
         super().__init__()
         self.lrgp_ =  LowRankApproxGP(n_components, random_state)
         self.random_state = random_state
@@ -88,7 +88,7 @@ class CoxLowRankSpatialPP() :
         
 
 
-    def __optimizeBound(self, n_warm_up = 10000, n_iter = 30, sp = Space()):
+    def __optimizeBound(self, n_warm_up = 1000, n_iter = 5, sp = Space()):
         
         random_state = check_random_state_instance(self.random_state)
         bounds = sp._bounds
@@ -128,7 +128,7 @@ class CoxLowRankSpatialPP() :
     
     
         
-    def generate(self, sp = Space(), batch_size =1, do_clipping = True, verbose = True):
+    def generate(self, sp = Space(), batch_size =1, do_clipping = True, verbose = False):
 
         random_state = check_random_state_instance(self.random_state)
         points_list = []
