@@ -35,9 +35,8 @@ class Test_Integration(unittest.TestCase):
         length_scale = self.length_scale
         unit_variance = self.unit_variance
 
-        gp = LowRankApproxGP(n_components = 100, random_state = rng)
-        gp.fit(length_scale, unit_variance)
-        integral_out, _ = gp.sq_integral_grad(length_scale, unit_variance)
+        gp = LowRankApproxGP(n_components = 100, random_state = rng).fit(length_scale, unit_variance)
+        integral_out, _ = gp.integral_grad(length_scale, unit_variance)
         integral_out = integral_out.numpy()
         
         integral_compare = integrate.dblquad( lambda x,y: gp.func(tf.constant([x,y], dtype=float_type))**2, 0, t,0, t)
@@ -52,7 +51,7 @@ class Test_Integration(unittest.TestCase):
         
         gp = LowRankApproxGP(n_components = 100, random_state = rng)
         gp.fit(length_scale, unit_variance)
-        integral_out, _ = gp.sq_integral_grad(length_scale, unit_variance, T = t)
+        integral_out, _ = gp.integral_grad(length_scale, unit_variance, T = t)
         integral_out = integral_out.numpy()
         
         integral_compare = integrate.dblquad( lambda x,y: gp.func(tf.constant([x,y], dtype=float_type))**2, 0, t,0, t)
@@ -77,10 +76,10 @@ class Test_Scaling(unittest.TestCase):
          unit_variance = self.unit_variance
          
          gp1 = LowRankApproxGP(n_components = 1000, random_state = rng)
-         gp1.fit(length_scale, unit_variance)
+         gp1.fit(length_scale , unit_variance, )
 
          variance = tf.Variable(2.0, dtype=float_type, name='sig')
-         gp2 = LowRankApproxGP(n_components = 1000, random_state = rng)
+         gp2 = LowRankApproxGP( n_components = 1000, random_state = rng)
          gp2.fit(length_scale, variance)
         
          gp2.randomFourier_.random_weights_ = gp1.randomFourier_.random_weights_

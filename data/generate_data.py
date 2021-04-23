@@ -7,7 +7,8 @@ tfk = tfp.math.psd_kernels
 
 float_type = tf.dtypes.float64
 
-from point.point_process import CoxLowRankSpatialPP
+from point.point_process import CoxLowRankSpatialModel
+
 
 
 
@@ -18,9 +19,8 @@ variance = tf.Variable(100.0, dtype=float_type, name='sig')
 
 length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
         
-p = CoxLowRankSpatialPP(length_scale=length_scale, variance = variance, n_components = 500, random_state = rng)
-data, sizes = p.generate(batch_size  = 100, verbose = False)
+p = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = 500, random_state = rng)
+data = p.generate(batch_size  = 100, verbose = True)
 
 directory = "D:\GitHub\point\data"
-#np.save(directory + "\data-synth_len.npy", sizes)
-#np.save(directory + "\data-synth_loc.npy", data)
+np.save(directory + "\data-synth-.npy", data)

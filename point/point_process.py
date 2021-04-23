@@ -22,8 +22,7 @@ class Space():
     def __init__(self, bounds = np.array(((0, 1), (0, 1))) ):
         super().__init__()
         self._bounds = bounds
-        
-        
+ 
     @property
     def x1Min(self):
         return self._bounds[0][0]
@@ -36,8 +35,7 @@ class Space():
         return self._bounds[1][0]
     @property
     def x2Max(self):
-        return self._bounds[1][1]
-        
+        return self._bounds[1][1]  
 
     def measure(self):
         return (self.x2Max - self.x1Min) * (self.x2Max - self.x1Min)
@@ -50,10 +48,19 @@ class Space():
     
     def x2Bound(self):
         return self._bounds[1]
-        
+    
     
 
-class HomogeneousSpatialPP() :
+class PointsData():
+    
+    def __init__(self, sizes, points):
+        self.batch_size = len(sizes)
+        self._sizes = sizes
+        self._points = points
+     
+    
+
+class HomogeneousSpatialModel() :
 
     def __init__(self, lam, random_state = None):
         super().__init__()
@@ -62,33 +69,37 @@ class HomogeneousSpatialPP() :
         
     def generate(self, sp = Space()):
         random_state = check_random_state_instance(self.random_state)
-        n_points = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure())[0]
-        points = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(n_points, sp._bounds.shape[0]))
+        n_points = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure())
+        points = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(n_points[0], sp._bounds.shape[0]))
         return points
     
     
-    
-    
-class CoxLowRankSpatialPP() :
+class CoxLowRankSpatialModel() :
     
     def __init__(self, length_scale, variance = 1.0, n_components = 100, random_state = None):
         super().__init__()
         self.lrgp_ =  LowRankApproxGP(n_components, random_state)
         self.random_state = random_state
-        self.length_scale = length_scale
-        self.variance  = variance
-
+        self.n_components = n_components
+        
+        self._length_scale = tf.Variable(length_scale, dtype=float_type, name='length_scale')
+        self._variance  = tf.Variable(variance, dtype=float_type, name='var')
+        
+    def trainable_variables(self):
+        return {'variance' : self._variance, 'length_scale' : self._length_scale}
+        
+    
     def __func(self, x):
         out = self.lrgp_.func(tf.constant([x[0], x[1]], dtype=float_type))
         out = out[0][0]
         return out.numpy()
     
-    def sample(self):
-        self.lrgp_.fit(self.length_scale, self.variance)
+    def fit(self):
+        self.lrgp_.fit(self._length_scale, self._variance)
         
 
 
-    def __optimizeBound(self, n_warm_up = 1000, n_iter = 5, sp = Space()):
+    def __optimizeBound(self, n_warm_up = 1000, n_iter = 20, sp = Space()):
         
         random_state = check_random_state_instance(self.random_state)
         bounds = sp._bounds
@@ -120,31 +131,30 @@ class CoxLowRankSpatialPP() :
             if max_fun is None or - res.fun >= max_fun:
                 max_fun = - res.fun
                 res_max = res
-                
-        self.lambdaMax = max_fun
-            
 
-        return res_max
+        return (max_fun, res_max)
     
     
         
-    def generate(self, sp = Space(), batch_size =1, do_clipping = True, verbose = False):
+    def generate(self, sp = Space(), batch_size =1, do_clipping = True, calc_grad = False, verbose = False):
 
         random_state = check_random_state_instance(self.random_state)
+        
         points_list = []
         sizes = []
+        grad = []
+        loglik = []
         max_len = 0
         
         for b in range(batch_size) :
-            self.sample()
-            self.__optimizeBound(sp = sp)
-            lambdaMax = self.lambdaMax
-            full_points  = HomogeneousSpatialPP(lambdaMax * sp.measure(), random_state= random_state ).generate(sp)
+            self.fit()
+            lambdaMax = self.__optimizeBound(sp = sp)[0]
+            full_points  = HomogeneousSpatialModel(lambdaMax * sp.measure(), random_state= random_state ).generate(sp)
             
             lambdas =  self.lrgp_.func(tf.constant(full_points, dtype=float_type))**2
             lambdas = lambdas.numpy()
-            n_lambdas = lambdas.shape[0]
             
+            n_lambdas = lambdas.shape[0]
             if do_clipping is True : lambdas = np.clip(lambdas, 0, lambdaMax)
             
             u = random_state.uniform(0, 1, n_lambdas)
@@ -157,16 +167,17 @@ class CoxLowRankSpatialPP() :
 
             points_list.append(retained_points)
             sizes.append(n_points)
-            
+
             if verbose :
                 print("[%s] %d-th sequence generated: %d raw samples. %d samples have been retained. " % \
                       (arrow.now(), b+1, n_lambdas, n_points), file=sys.stderr)
                     
-        data = np.zeros((batch_size, max_len, 2))
+        # padding for the output
+        points = np.zeros((batch_size, max_len, 2))
         for b in range(batch_size):
-            data[b, :points_list[b].shape[0]] = points_list[b]
+            points[b, :points_list[b].shape[0]] = points_list[b]
         
-        return data, sizes
+        return PointsData(sizes, points)
     
     
 

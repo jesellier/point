@@ -10,7 +10,7 @@ float_type = tf.dtypes.float64
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-rng = np.random.RandomState(40)
+rng = np.random.RandomState(20)
 
 #variance = tf.Variable(100.0, dtype=float_type, name='sig')
 #length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
@@ -71,6 +71,8 @@ reward = reward_vector(learner_l, expert_l, kernel)
 size_l = sizes[shuffled_learner_ids]
 splits = tf.split(reward, size_l)
 rewards =[ tf.math.reduce_sum(s).numpy() for s in splits]
+
+print(rewards)
 
 
 

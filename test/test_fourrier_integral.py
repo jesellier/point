@@ -178,11 +178,9 @@ class TestFullIntegral(unittest.TestCase):
     
     def setUp(self):
         self.gp = LowRankApproxGP(n_components = 2, random_state = rng)
-        self.gp.fit(tf.ones(2, dtype=float_type))
-        #mat3 = gp.__integral_mat(self, T = 1.0):
-            
+        self.gp.fit(tf.ones(2, dtype=float_type), tf.ones(1, dtype=float_type))  #dummy fitting
 
-    
+
     #TESTS a = 1 ; int cos(b)cos(x1 + x2 + b)
     def test_1(self):
         a = 1.0

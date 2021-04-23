@@ -34,27 +34,45 @@ def transformMat(vec, n):
 
 class LowRankApproxGP():
     
-    def __init__(self, n_components = 1000, random_state = None):
+    def __init__(self,  n_components = 1000, random_state = None):
         self.random_state = random_state
         self.n_components = n_components
-        self.is_fitted = False
-
+        self.randomFourier_ = RandomFourierWithOffset(n_components = self.n_components, random_state = random_state)
         
-    def fit(self, length_scale, variance = 1.0):
+        self._length_scale =  None
+        self._variance = None
+        self.is_fitted = False
+        
+        
+        
+    def trainable_variables(self):
+        return {'variance' : self._variance, 'length_scale' : self._length_scale}
+         
+
+    def fit(self, length_scale, variance):
         random_state = check_random_state_instance(self.random_state)
+        self._length_scale =  length_scale
+        self._variance = variance
         
         #sample the betas
         size = (self.n_components, 1)
         self.beta_ = tf.constant(random_state.normal(size = size), dtype=float_type, name='beta')
-        #self.beta_ = tf.constant(tf.ones(size,  dtype=float_type), dtype=float_type)
-        
+
         #fit the RFF
-        g = 1 / (2 * length_scale **2 )
-        self.randomFourier_ = RandomFourierWithOffset(n_components = self.n_components, n_features = 2, gamma = g, variance = variance, random_state = random_state)
-        self.randomFourier_.sample()
+        gamma = 1 / (2 * self._length_scale **2 )
+        self.randomFourier_.fit(gamma = gamma, variance = self._variance, )
         self.is_fitted = True
         
+        return self
+        
     
+    def reset_trainable_variables(self, variance, length_scale):
+        self._variance = variance
+        self._length_scale = length_scale 
+        gamma = 1 / (2 * self._length_scale **2 )
+        self.randomFourier_.reset_trainable_variables(self._variance, gamma)
+
+
     def func(self, X) :
         if not self.is_fitted :
             raise ValueError("instance not fitted")
@@ -63,22 +81,34 @@ class LowRankApproxGP():
         return features @ self.beta_
 
     
-    def sq_integral_grad(self, length_scale, variance = 1.0,  T = 1.0):
-
-        with tf.GradientTape() as tape: 
-            self.fit(length_scale, variance)
+    def integral_grad(self, length_scale = None, variance = None, T = 1.0):
+        
+        if length_scale is None :
+            length_scale = self._length_scale
+            
+        if variance is None :
+            variance = self._variance
+            
+        with tf.GradientTape() as tape:      
+            self.reset_trainable_variables(variance, length_scale)
             mat = self.__integral_mat(T)
             out = tf.transpose(self.beta_) @ mat @ self.beta_
             out = out[0][0]
             
-        grad = tape.gradient(out, [variance, length_scale]  )
+        grad = tape.gradient(out, [variance, length_scale])
         return (out, grad)
     
     
-    def pp_likelihood_grad(self, length_scale, variance = 1.0, T = 1.0):
+    def likelihood_grad(self, X, length_scale = None, variance = None, T = 1.0):
+        
+        if length_scale is None :
+            length_scale = self._length_scale
+            
+        if variance is None :
+            variance = self._variance
 
         with tf.GradientTape() as tape: 
-            self.fit(length_scale, variance)
+            self.reset_trainable_variables(variance, length_scale)
             mat = self.__integral_mat(T)
             
             int_term = tf.transpose(self.beta_) @ mat @ self.beta_
@@ -131,12 +161,12 @@ if __name__ == '__main__':
     rng = np.random.RandomState(40)
     X = tf.constant(rng.normal(size = [100, 2]), dtype=float_type, name='X')
     
-    amplitude = tf.Variable(0.5, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
+    variance = tf.Variable(0.5, dtype=float_type, name='sig')
+    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='lenght_scale')
 
-    gp = LowRankApproxGP(n_components = 1000, random_state = rng)
-    out, grad = gp.sq_integral_grad(length_scale, amplitude)
-    out, grad = gp.pp_likelihood_grad(length_scale, amplitude)
+    gp = LowRankApproxGP(n_components = 1000, random_state = rng).fit(length_scale, variance)
+    out, grad = gp.integral_grad()
+    out, grad = gp.likelihood_grad(X)
     print(out)
     print(grad)
     

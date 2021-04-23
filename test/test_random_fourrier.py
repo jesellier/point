@@ -50,12 +50,12 @@ class Test_RFF(unittest.TestCase):
         gamma = self.gamma
         unit_variance = self.unit_variance
         
-        rbf1 = RandomFourier(n_components=size, gamma = gamma, variance = unit_variance, random_state = rng).sample()
+        rbf1 = RandomFourier(n_components=size, random_state = rng).fit(gamma = gamma, variance = unit_variance)
         feature1 = rbf1.feature(X).numpy()
         k1 = rbf1.kernel(X).numpy()
 
         variance = tf.Variable(2.0, dtype=float_type, name='sig')
-        rbf2 = RandomFourier(n_components=size, gamma = self.gamma, variance = variance, random_state = rng).sample()
+        rbf2 = RandomFourier(n_components=size, random_state = rng).fit(gamma = self.gamma, variance = variance)
         rbf2.random_weights_ = rbf1.random_weights_
         
         feature2 = rbf2.feature(X).numpy()
@@ -80,12 +80,12 @@ class Test_RFF(unittest.TestCase):
         gamma = self.gamma
         unit_variance = self.unit_variance
         
-        rbf1 =  RandomFourierWithOffset(n_components=size, gamma = gamma, variance = unit_variance, random_state = rng).sample()
+        rbf1 =  RandomFourierWithOffset(n_components=size, random_state = rng).fit(gamma = gamma, variance = unit_variance)
         feature1 = rbf1.feature(X).numpy()
         k1 = rbf1.kernel(X).numpy()
     
         variance = tf.Variable(2.0, dtype=float_type, name='sig')
-        rbf2 =  RandomFourierWithOffset(n_components=size, gamma = gamma, variance = variance, random_state = rng).sample()
+        rbf2 =  RandomFourierWithOffset(n_components=size, random_state = rng).fit(gamma = gamma, variance = variance)
         rbf2.random_weights_ = rbf1.random_weights_
         rbf2.random_offset_ = rbf1.random_offset_
         
@@ -123,8 +123,8 @@ if __name__ == '__main__':
     
     ## RF
     gamma = 1 / (2 * length_scale **2 )
-    rbf1 = RandomFourier(n_components=1000, gamma = gamma, variance = amplitude**2, random_state = rng).sample()
-    rbf2 = RandomFourierWithOffset(n_components=1000, gamma = gamma, variance = amplitude**2 , random_state = rng).sample()
+    rbf1 = RandomFourier(n_components=1000, random_state = rng).fit(gamma = gamma, variance = amplitude**2)
+    rbf2 = RandomFourierWithOffset(n_components=1000 , random_state = rng).fit( gamma = gamma, variance = amplitude**2)
     test = exponentialKernel(X[0], X[1], gamma)
     
     K1 = rbf1.kernel(X).numpy()
@@ -143,7 +143,7 @@ if __name__ == '__main__':
 
     with tf.GradientTape() as tape: 
          g = 1 / (2 * length_scale **2 )
-         rbf_grad = RandomFourier(n_components=100, gamma = g, random_state = rng).sample()
+         rbf_grad = RandomFourier(n_components=100, random_state = rng).fit(gamma = g)
          out = rbf_grad.kernel(X)[0,1]
          #print(out)
 
