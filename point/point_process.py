@@ -53,10 +53,12 @@ class Space():
 
 class PointsData():
     
-    def __init__(self, sizes, points):
+    def __init__(self, sizes, point_locations, loglik = None, grad = None):
         self.batch_size = len(sizes)
         self._sizes = sizes
-        self._points = points
+        self._locs = point_locations
+        self._grad = grad
+        self._loglik = loglik
      
     
 
@@ -86,7 +88,7 @@ class CoxLowRankSpatialModel() :
         self._variance  = tf.Variable(variance, dtype=float_type, name='var')
         
     def trainable_variables(self):
-        return {'variance' : self._variance, 'length_scale' : self._length_scale}
+        return [self._variance, self._length_scale]
         
     
     def __func(self, x):
@@ -142,14 +144,14 @@ class CoxLowRankSpatialModel() :
         
         points_list = []
         sizes = []
-        grad = []
+        grad_list = []
         loglik = []
         max_len = 0
         
         for b in range(batch_size) :
             self.fit()
             lambdaMax = self.__optimizeBound(sp = sp)[0]
-            full_points  = HomogeneousSpatialModel(lambdaMax * sp.measure(), random_state= random_state ).generate(sp)
+            full_points  = HomogeneousSpatialModel(lambdaMax * sp.measure(), random_state= random_state).generate(sp)
             
             lambdas =  self.lrgp_.func(tf.constant(full_points, dtype=float_type))**2
             lambdas = lambdas.numpy()
@@ -167,6 +169,11 @@ class CoxLowRankSpatialModel() :
 
             points_list.append(retained_points)
             sizes.append(n_points)
+            
+            if calc_grad :
+               out, grad = self.lrgp_.likelihood_grad(retained_points)
+               loglik .append(out)
+               grad_list.append(grad)
 
             if verbose :
                 print("[%s] %d-th sequence generated: %d raw samples. %d samples have been retained. " % \
@@ -177,7 +184,7 @@ class CoxLowRankSpatialModel() :
         for b in range(batch_size):
             points[b, :points_list[b].shape[0]] = points_list[b]
         
-        return PointsData(sizes, points)
+        return PointsData(sizes, points, loglik, np.array(grad_list, dtype=object))
     
     
 
@@ -189,10 +196,6 @@ def print_points(x1, x2 = None):
         
     plt.xlabel("x"); plt.ylabel("y");
     plt.show();
-
-    
-
-    
 
 
         

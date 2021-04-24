@@ -43,8 +43,7 @@ class LowRankApproxGP():
         self._variance = None
         self.is_fitted = False
         
-        
-        
+
     def trainable_variables(self):
         return {'variance' : self._variance, 'length_scale' : self._length_scale}
          
@@ -152,7 +151,7 @@ class LowRankApproxGP():
         diag = (1 / (4 * w[:,0] * w[:,1])) * ( tf.cos(2 *T * w[:,1] + bdo) + tf.cos(2 *T * w[:,0] + bdo) - tf.cos(2 *T * ( w[:,0] +  w[:,1] ) + bdo)  - tf.cos(bdo)) +  T**2
         mat = tf.linalg.set_diag(mat, diag) 
     
-        return  mat / R
+        return  self._variance * mat / R
         
         
 
@@ -165,7 +164,6 @@ if __name__ == '__main__':
     length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='lenght_scale')
 
     gp = LowRankApproxGP(n_components = 1000, random_state = rng).fit(length_scale, variance)
-    out, grad = gp.integral_grad()
     out, grad = gp.likelihood_grad(X)
     print(out)
     print(grad)
