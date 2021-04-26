@@ -9,7 +9,7 @@ tfk = tfp.math.psd_kernels
 
 float_type = tf.dtypes.float64
 
-from point.point_process import CoxLowRankSpatialModel
+from point.point_process import CoxLowRankSpatialModel, Space
 
 rng = np.random.RandomState(20)
 
@@ -17,28 +17,34 @@ rng = np.random.RandomState(20)
 
 directory = "D:\GitHub\point\data"
 expert_seq = np.load(directory + "\data_synth_points.npy")
-#expert_sizes = np.load(directory + "\data_synth_sizes.npy")
+expert_variables = np.load(directory + "\data_synth_variables.npy", allow_pickle=True)
+expert_space = np.load(directory + "\data_synth_space.npy", allow_pickle=True)
+print("[{}] SYNTH-DATA variables : {}".format(arrow.now(), expert_variables), file=sys.stderr)
 
 ####### HYPER PARAMETERS
-num_epochs = 10
+num_epochs = 1
 num_batches = 1
 
-batch_learner_size = 100
+batch_learner_size = 10
 batch_expert_size = None
 n_components = 800 #RFF sampling order
 
 ####### INIT
 num_experts = expert_seq.shape[0]
     
+#variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sig')
+#length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='l')
 
-variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sig')
-length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='l')
+variance = tf.Variable([20.0], dtype=float_type, name='sig')
+length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
 
-#variance = tf.Variable(10.0, dtype=float_type, name='sig')
-#length_scale = tf.Variable([0.1,0.1], dtype=float_type, name='l')
-
-process = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = n_components, random_state = rng)
+space = Space(lower_bounds = expert_space[0], higher_bounds = expert_space[1])
+model = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = n_components, random_state = rng)
 reward_kernel = tfp.math.psd_kernels.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=float_type),name='ExponentiatedQuadratic')
+
+learning_rate = 0.001
+optimizer = tf.keras.optimizers.SGD(learning_rate= learning_rate)
+
 
 print("[{}] INIT with variance:={}, length_scale:={}".format(arrow.now(), variance, length_scale))
 
@@ -90,7 +96,7 @@ for epoch in range(num_epochs):
             batch_expert_locs = expert_seq[shuffled_ids]
 
         # generate learner samples
-        learner_data = process.generate(batch_size = batch_learner_size, calc_grad = True, verbose = verbose)
+        learner_data = model.generate(sp = space, batch_size = batch_learner_size, calc_grad = True, verbose = verbose)
         batch_learner_locs = learner_data._locs
         
         # compute rewards
@@ -100,19 +106,19 @@ for epoch in range(num_epochs):
         
         #compute gradient
         grad_per_batch = learner_data._grad
-        grad =[ tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  tf.stack(c) / batch_learner_size , axis = 0)  for c in grad_per_batch.T]
+        grads =[ tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  tf.stack(c) / batch_learner_size , axis = 0)  for c in grad_per_batch.T]
         
         #compute log likelihood
         loglik =  tf.math.reduce_sum(tf.stack(learner_data._loglik) / batch_learner_size, axis = 0)
         loglik = loglik.numpy()
         
-        #printout
-        print("[{}] grad : {}".format(arrow.now(), grad[0]), file=sys.stderr)
-        print("[{}] grad : {}".format(arrow.now(), grad[1]), file=sys.stderr)
-        print("[{}] grad : {}".format(arrow.now(), loglik), file=sys.stderr)
+        optimizer.apply_gradients(zip(grads, model.trainable_variables))
         
-
-        #optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        #printout
+        print("[{}] grad : {}".format(arrow.now(), grads[0]))
+        print("[{}] grad : {}".format(arrow.now(), grads[1]))
+        print("[{}] variables : {}".format(arrow.now(), model.trainable_variables))
+        print("[{}] loss : {}".format(arrow.now(), loglik))
 
 
 

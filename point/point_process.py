@@ -19,9 +19,10 @@ from point.low_rank_gp import LowRankApproxGP
 
 
 class Space():
-    def __init__(self, bounds = np.array(((0, 1), (0, 1))) ):
-        super().__init__()
-        self._bounds = bounds
+    def __init__(self, lower_bounds = 0, higher_bounds = 1):
+        self._bounds = np.array(((lower_bounds,  higher_bounds ), (lower_bounds,  higher_bounds ))) 
+        self._lower_bounds=  lower_bounds
+        self._higher_bounds = higher_bounds
  
     @property
     def x1Min(self):
@@ -50,17 +51,33 @@ class Space():
         return self._bounds[1]
     
     
-
+    
 class PointsData():
     
-    def __init__(self, sizes, point_locations, loglik = None, grad = None):
+    def __init__(self, sizes, point_locations, space, trainable_variables = None, loglik = None, grad = None):
         self.batch_size = len(sizes)
+        self._space = space
+        
         self._sizes = sizes
         self._locs = point_locations
+
         self._grad = grad
         self._loglik = loglik
-     
+        self._variables = trainable_variables
+        
     
+        
+class TransformerLogExp():
+    def __init__(self):
+        pass
+    
+    def __call__(self, theta):
+        return tf.math.log(tf.math.exp(theta) - 1)
+    
+    def inverse(self, theta):
+        return tf.math.log(tf.math.exp(theta) + 1)
+     
+        
 
 class HomogeneousSpatialModel() :
 
@@ -75,21 +92,25 @@ class HomogeneousSpatialModel() :
         points = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(n_points[0], sp._bounds.shape[0]))
         return points
     
+
+
     
 class CoxLowRankSpatialModel() :
     
-    def __init__(self, length_scale, variance = 1.0, n_components = 100, random_state = None):
+    def __init__(self, length_scale, variance = 1.0, n_components = 100, random_state = None, transformer = TransformerLogExp()):
         super().__init__()
         self.lrgp_ =  LowRankApproxGP(n_components, random_state)
+        self.transformer = transformer
         self.random_state = random_state
         self.n_components = n_components
         
-        self._length_scale = tf.Variable(length_scale, dtype=float_type, name='length_scale')
-        self._variance  = tf.Variable(variance, dtype=float_type, name='var')
-        
+        self._length_scale = length_scale
+        self._variance = variance
+
+    @property
     def trainable_variables(self):
         return [self._variance, self._length_scale]
-        
+    
     
     def __func(self, x):
         out = self.lrgp_.func(tf.constant([x[0], x[1]], dtype=float_type))
@@ -146,6 +167,7 @@ class CoxLowRankSpatialModel() :
         sizes = []
         grad_list = []
         loglik = []
+        
         max_len = 0
         
         for b in range(batch_size) :
@@ -171,7 +193,10 @@ class CoxLowRankSpatialModel() :
             sizes.append(n_points)
             
             if calc_grad :
-               out, grad = self.lrgp_.likelihood_grad(retained_points)
+               out, grad = self.lrgp_.likelihood_grad(retained_points, 
+                                                      lplus = sp._higher_bounds, 
+                                                      lminus = sp._lower_bounds)
+               
                loglik .append(out)
                grad_list.append(grad)
 
@@ -184,7 +209,11 @@ class CoxLowRankSpatialModel() :
         for b in range(batch_size):
             points[b, :points_list[b].shape[0]] = points_list[b]
         
-        return PointsData(sizes, points, loglik, np.array(grad_list, dtype=object))
+        return PointsData(sizes, points, [sp._lower_bounds, sp._higher_bounds],
+                          np.array(self.trainable_variables, dtype=object), 
+                          loglik, 
+                          np.array(grad_list, dtype=object)
+                          )
     
     
 
@@ -195,7 +224,33 @@ def print_points(x1, x2 = None):
         plt.scatter(x2[:,0], x2[:,1], edgecolor='r', facecolor='none', alpha=0.5 );
         
     plt.xlabel("x"); plt.ylabel("y");
-    plt.show();
+    plt.show()
+    
+    
+    
+if __name__ == "__main__":
+    rng = np.random.RandomState(40)
+    variance = tf.Variable(5.0, dtype=float_type, name='sig')
+    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
+    p = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = 500, random_state = rng)
+    p.fit()
+    
+    X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
+    
+    out, grad = p.lrgp_.likelihood_grad(X, 
+                            lplus = 1.0, 
+                            lminus = 0.0)
+    
+    print(out)
+    print(grad)
+    
+    
+    
+    #space = Space(-1,1)
+    #data = p.generate(batch_size  = 10, verbose = True, sp = space)
+    
+    
+    
 
 
         

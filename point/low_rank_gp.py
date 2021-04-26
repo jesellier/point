@@ -80,7 +80,7 @@ class LowRankApproxGP():
         return features @ self.beta_
 
     
-    def integral_grad(self, length_scale = None, variance = None, T = 1.0):
+    def integral_grad(self, length_scale = None, variance = None, lplus = 1.0, lminus = 0):
         
         if length_scale is None :
             length_scale = self._length_scale
@@ -90,7 +90,7 @@ class LowRankApproxGP():
             
         with tf.GradientTape() as tape:      
             self.reset_trainable_variables(variance, length_scale)
-            mat = self.__integral_mat(T)
+            mat = self.__integral_mat(lplus, lminus)
             out = tf.transpose(self.beta_) @ mat @ self.beta_
             out = out[0][0]
             
@@ -98,7 +98,7 @@ class LowRankApproxGP():
         return (out, grad)
     
     
-    def likelihood_grad(self, X, length_scale = None, variance = None, T = 1.0):
+    def likelihood_grad(self, X, length_scale = None, variance = None, lplus = 1.0, lminus = 0):
         
         if length_scale is None :
             length_scale = self._length_scale
@@ -106,9 +106,10 @@ class LowRankApproxGP():
         if variance is None :
             variance = self._variance
 
+
         with tf.GradientTape() as tape: 
             self.reset_trainable_variables(variance, length_scale)
-            mat = self.__integral_mat(T)
+            mat = self.__integral_mat(lplus, lminus)
             
             int_term = tf.transpose(self.beta_) @ mat @ self.beta_
             int_term = int_term[0][0]
@@ -125,7 +126,7 @@ class LowRankApproxGP():
         
 
     
-    def __integral_mat(self, T = 1.0):
+    def __integral_mat(self, lplus = 1.0, lminus = 0):
         """ w = vector of weights, T = expiry, b = vector of drifts """
         if not self.is_fitted :
             raise ValueError("instance not fitted")
@@ -144,11 +145,15 @@ class LowRankApproxGP():
         else :
             (b1, b2) = transformMat(b, R)
 
-        mat = (1 / (A * B)) * ( tf.cos(T * A + b1) + tf.cos(T * B + b1) - tf.cos(T * (A + B) + b1)  - tf.cos(b1))
-        mat += (1 / (C * D)) * ( tf.cos(T * C + b2) + tf.cos(T * D + b2) - tf.cos(T * (C + D) + b2)  - tf.cos(b2))
+        mat = (1 / (A * B)) * ( tf.cos(lplus*A + lminus*B + b1) + tf.cos(lminus*A + lplus*B + b1)  \
+                               - tf.cos(lplus*(A + B) + b1)  - tf.cos(lminus*(A + B) + b1))
+        mat += (1 / (C * D)) * (tf.cos(lplus*C + lminus*D + b2) + tf.cos(lminus*C + lplus*D + b2)  \
+                                - tf.cos(lplus*(C + D) + b2)  - tf.cos(lminus*(C + D) + b2 ))
         
         bdo = 2 * b
-        diag = (1 / (4 * w[:,0] * w[:,1])) * ( tf.cos(2 *T * w[:,1] + bdo) + tf.cos(2 *T * w[:,0] + bdo) - tf.cos(2 *T * ( w[:,0] +  w[:,1] ) + bdo)  - tf.cos(bdo)) +  T**2
+        diag = (1 / (4 * w[:,0] * w[:,1])) * ( tf.cos(2 * (lplus*w[:,0] + lminus* w[:,1]) + bdo) + tf.cos(2 * (lminus*w[:,0] + lplus* w[:,1]) + bdo) \
+                                              - tf.cos(2 *lplus* (w[:,0]+ w[:,1]) + bdo) - tf.cos(2 *lminus*(w[:,0]+ w[:,1]) + bdo) ) \
+                                              +  (lplus - lminus)**2
         mat = tf.linalg.set_diag(mat, diag) 
     
         return  self._variance * mat / R
@@ -164,6 +169,7 @@ if __name__ == '__main__':
     length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='lenght_scale')
 
     gp = LowRankApproxGP(n_components = 1000, random_state = rng).fit(length_scale, variance)
+    print(gp._variance)
     out, grad = gp.likelihood_grad(X)
     print(out)
     print(grad)
