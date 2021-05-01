@@ -3,6 +3,8 @@ import numpy as np
 import math
 import numbers
 
+import tensorflow as tf
+
 
 def check_random_state_instance(seed):
     """Turn seed into a np.random.RandomState instance
@@ -23,33 +25,13 @@ def check_random_state_instance(seed):
         return seed
     raise ValueError('%r cannot be used to seed a numpy.random.RandomState'
                      ' instance' % seed)
-    
 
 
-#def getRandomSDMatrix(matrixSize, rng):
-    #'random positive semi-define matrix (with inital A has rand[0,1] entry)
-    #A = rng.rand(matrixSize, matrixSize)
-    #B = np.dot(A, A.transpose())
-    #return B
 
-#def getSumProdMatrix(A,B):
-    #s = 0
-   # for i in range(len(A)):
-        #for j in range(len(B)):
-            #s = s + A[i,j]*B[i,j]
-    #return s
-
-
-#def ratioDerivative(kappa, n0, n1):
-    #return the partial derivative of kappa[0]/kappa[1] for
-    #der = 0
-    #if n0 >= 2 :
-        #return 0
-    #der = ((-1)**n1) * math.factorial(n1) * ((kappa[1])**(-n1 - 1))
-    #if n0 == 0 :
-        #return der * kappa[0]
-
-    #return der
+def transformMat(vec, n):
+    #for a vector vec return two matrices M1 = {v_i + v_j}_{i,j}  M1 = {v_i - v_j}_{i,j}
+    M = tf.reshape(tf.tile(vec, tf.constant([n])), [n, tf.shape(vec)[0]])
+    return (tf.transpose(M) + M, tf.transpose(M)-M)
 
 
     

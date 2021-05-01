@@ -13,7 +13,7 @@ import unittest
 
 float_type = tf.dtypes.float64
 rng = np.random.RandomState(40)
-from point.low_rank_gp import LowRankApproxGP
+from point.low_rank_rff import LowRankRFF
 
 
 
@@ -214,8 +214,11 @@ class TestIntegralPart2(unittest.TestCase):
 class TestFullIntegral(unittest.TestCase):
     
     def setUp(self):
-        self.gp = LowRankApproxGP(n_components = 2, random_state = rng)
-        self.gp.fit(tf.ones(2, dtype=float_type), tf.ones(1, dtype=float_type))  #dummy fitting
+        variance = tf.ones(1, dtype=float_type)
+        lenghtscale = (tf.ones(2, dtype=float_type))
+        self.gp = LowRankRFF(lenghtscale, variance, n_components = 2, random_state = rng)
+        #self.trainable_variables = (tf.ones(2, dtype=float_type), tf.ones(1, dtype=float_type))
+        self.gp.fit()  #dummy fitting
 
 
     #TESTS lplus = 1, lminus = 0; diag_term = int cos(b)cos(x1 + x2 + b)
@@ -229,10 +232,10 @@ class TestFullIntegral(unittest.TestCase):
         mat1 = 0.5 * (tmp1 + tmp2 )
         mat2 =  integral_cos_mat(w = w, lplus = lplus, b = b).numpy()
 
-        R = self.gp.randomFourier_.n_components
-        self.gp.randomFourier_.random_weights_ = tf.transpose(w)
-        self.gp.randomFourier_.random_offset_ = b
-        mat3 = R * 0.5 * self.gp._LowRankApproxGP__integral_mat(lplus = lplus).numpy()
+        R = self.gp.n_components
+        self.gp.random_weights_ = tf.transpose(w)
+        self.gp.random_offset_ = b
+        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
         
         #must process the Nan number in [0][0]
         mat1[np.isnan(mat1)] = np.inf
@@ -254,10 +257,10 @@ class TestFullIntegral(unittest.TestCase):
         mat1 = 0.5 * (tmp1 + tmp2 )
         mat2 =  integral_cos_mat(w, lplus).numpy()
         
-        R = self.gp.randomFourier_.n_components
-        self.gp.randomFourier_.random_weights_ = tf.transpose(w)
-        self.gp.randomFourier_.random_offset_ = tf.constant(0.0, dtype=float_type)
-        mat3 = R * 0.5 * self.gp._LowRankApproxGP__integral_mat(lplus = lplus).numpy()
+        R = self.gp.n_components
+        self.gp.random_weights_ = tf.transpose(w)
+        self.gp.random_offset_ = tf.constant(0.0, dtype=float_type)
+        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
   
         self.assertTrue((mat2 == mat1).all())
         self.assertTrue((mat3 == mat2).all())
@@ -274,10 +277,10 @@ class TestFullIntegral(unittest.TestCase):
 
         mat1 =  integral_cos_mat(w, lplus, b=b).numpy()
     
-        R = self.gp.randomFourier_.n_components
-        self.gp.randomFourier_.random_weights_ = tf.transpose(w)
-        self.gp.randomFourier_.random_offset_ = b
-        mat2 = R * 0.5 * self.gp._LowRankApproxGP__integral_mat(lplus = lplus).numpy()
+        R = self.gp.n_components
+        self.gp.random_weights_ = tf.transpose(w)
+        self.gp.random_offset_ = b
+        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
 
         self.assertTrue((mat2 == mat1).all())
         self.assertAlmostEqual(mat2[0,0], 0.3012653529971747, places=7)
@@ -294,10 +297,10 @@ class TestFullIntegral(unittest.TestCase):
 
         mat1 =  integral_cos_mat(w, lplus, lminus, b=b).numpy()
     
-        R = self.gp.randomFourier_.n_components
-        self.gp.randomFourier_.random_weights_ = tf.transpose(w)
-        self.gp.randomFourier_.random_offset_ = b
-        mat2 = R * 0.5 * self.gp._LowRankApproxGP__integral_mat(lplus = lplus, lminus = lminus).numpy()
+        R = self.gp.n_components
+        self.gp.random_weights_ = tf.transpose(w)
+        self.gp.random_offset_ = b
+        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus, lminus = lminus).numpy()
 
         self.assertTrue((mat2 == mat1).all())
         self.assertAlmostEqual(mat2[0,0], 0.7357636641212484, places=7)
@@ -311,9 +314,9 @@ class TestFullIntegral(unittest.TestCase):
         b = tf.constant([2.0, 3.0], dtype=float_type, name='b')
         mat1 =  integral_cos_mat(w=w, lplus=lplus, b=b).numpy()
         
-        self.gp.randomFourier_.random_weights_ = tf.transpose(w)
-        self.gp.randomFourier_.random_offset_ = b
-        mat2 = self.gp._LowRankApproxGP__integral_mat(lplus = lplus).numpy()
+        self.gp.random_weights_ = tf.transpose(w)
+        self.gp.random_offset_ = b
+        mat2 = self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
         
         self.assertTrue((mat2 == mat1).all())
         self.assertAlmostEqual(mat1[0,0], 0.3012653529971747, places=7)

@@ -13,59 +13,26 @@ float_type = tf.dtypes.float64
 from scipy.optimize import minimize #For optimizing
 
 from point.utils import check_random_state_instance
-from point.low_rank_gp import LowRankApproxGP
+from point.low_rank_rff import LowRankRFF
+from point.low_rank_nystrom import LowRankNystrom
+from point.misc import Space
+
+import gpflow.kernels as gfk
 
 
-
-
-class Space():
-    def __init__(self, lower_bounds = 0, higher_bounds = 1):
-        self._bounds = np.array(((lower_bounds,  higher_bounds ), (lower_bounds,  higher_bounds ))) 
-        self._lower_bounds=  lower_bounds
-        self._higher_bounds = higher_bounds
- 
-    @property
-    def x1Min(self):
-        return self._bounds[0][0]
-    
-    @property
-    def x1Max(self):
-        return self._bounds[0][1]
-    @property
-    def x2Min(self):
-        return self._bounds[1][0]
-    @property
-    def x2Max(self):
-        return self._bounds[1][1]  
-
-    def measure(self):
-        return (self.x2Max - self.x1Min) * (self.x2Max - self.x1Min)
-        
-    def center(self):
-        return [(self.x1Min + self.x1Max)/2,(self.x2Min + self.x2Max)/2]
-    
-    def x1Bound(self):
-        return self._bounds[0]
-    
-    def x2Bound(self):
-        return self._bounds[1]
-    
-    
-    
 class PointsData():
     
     def __init__(self, sizes, point_locations, space, trainable_variables = None, loglik = None, grad = None):
         self.batch_size = len(sizes)
-        self._space = space
+        self.space = space
         
-        self._sizes = sizes
-        self._locs = point_locations
+        self.sizes = sizes
+        self.locs = point_locations
 
-        self._grad = grad
-        self._loglik = loglik
-        self._variables = trainable_variables
+        self.grad = grad
+        self.loglik = loglik
+        self.variables = trainable_variables
         
-    
         
 class TransformerLogExp():
     def __init__(self):
@@ -82,14 +49,13 @@ class TransformerLogExp():
 class HomogeneousSpatialModel() :
 
     def __init__(self, lam, random_state = None):
-        super().__init__()
         self.lambda_ = lam
         self.random_state = random_state
         
     def generate(self, sp = Space()):
         random_state = check_random_state_instance(self.random_state)
-        n_points = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure())
-        points = random_state.uniform(sp._bounds[:, 0], sp._bounds[:, 1], size=(n_points[0], sp._bounds.shape[0]))
+        n_points = random_state.poisson(size= 1, lam =self.lambda_ * sp.measure)
+        points = random_state.uniform(sp.bounds[:, 0], sp.bounds[:, 1], size=(n_points[0], sp.bounds.shape[0]))
         return points
     
 
@@ -97,72 +63,90 @@ class HomogeneousSpatialModel() :
     
 class CoxLowRankSpatialModel() :
     
-    def __init__(self, length_scale, variance = 1.0, n_components = 100, random_state = None, transformer = TransformerLogExp()):
-        super().__init__()
-        self.lrgp_ =  LowRankApproxGP(n_components, random_state)
-        self.transformer = transformer
+    def __init__(self, low_rank_gp, random_state = None):
+        self.lrgp =  low_rank_gp
         self.random_state = random_state
-        self.n_components = n_components
-        
-        self._length_scale = length_scale
-        self._variance = variance
+
 
     @property
+    def parameters(self):
+        return self.lrgp.parameters
+        
+    @property
     def trainable_variables(self):
-        return [self._variance, self._length_scale]
+        return self.lrgp.trainable_variables
+
     
+    def sample(self):
+        self.lrgp.sample()
     
-    def __func(self, x):
-        out = self.lrgp_.func(tf.constant([x[0], x[1]], dtype=float_type))
-        out = out[0][0]
-        return out.numpy()
-    
-    def fit(self):
-        self.lrgp_.fit(self._length_scale, self._variance)
+
+    def likelihood_grad(self, points, lplus = 1, lminus = 0):
+        if not self.lrgp.is_fitted :
+            raise ValueError("lowRankGP instance not fitted")
+
+        with tf.GradientTape() as tape:  
+            self.lrgp.fit(sample = False)
+            out = self.lrgp.likelihood(points, lplus = lplus, lminus = lminus)
+
+        grad = tape.gradient(out, self.trainable_variables) 
+        
+        return (out, grad)
         
 
 
-    def __optimizeBound(self, n_warm_up = 1000, n_iter = 20, sp = Space()):
+    def __optimizeBound(self, n_warm_up = 10000, n_iter = 0, sp = Space()):
         
         random_state = check_random_state_instance(self.random_state)
-        bounds = sp._bounds
+        bounds = sp.bounds
 
         max_fun = 0
+        res_max = None
+        
+        def __func(x):
+             out = self.lrgp.func(tf.constant([x[0], x[1]], dtype=float_type))
+             out = out[0][0]
+             return out.numpy()
+        
         # Warm up with random points
         if n_warm_up is not None and n_warm_up > 0 :
             x_tries = random_state.uniform(bounds[:, 0], bounds[:, 1], size=(n_warm_up, bounds.shape[0]))
-            fs = self.lrgp_.func(tf.constant(x_tries, dtype=float_type))**2
+            
+            self.x_tries = x_tries
+            fs = self.lrgp.func(tf.constant(x_tries, dtype=float_type))**2
             fs = fs.numpy()
             
             max_fun = fs.max()
+
             #x_max = x_tries[fs.argmax()]
         
         # Explore the parameter space more throughly
-        x_seeds = random_state.uniform(bounds[:, 0], bounds[:, 1], size=(n_iter, bounds.shape[0]))
-        x_seeds = np.append(x_seeds, [sp.center()], axis=0)
-        res_max = None
+        if n_iter > 0:
+            x_seeds = random_state.uniform(bounds[:, 0], bounds[:, 1], size=(n_iter, bounds.shape[0]))
+            x_seeds = np.append(x_seeds, [sp.center], axis=0)
+            res_max = None
         
-        for x_try in x_seeds:
-            # Find the minimum of minus the acquisition function
-            res = minimize(lambda x: - (self.__func(x)**2), x_try, bounds=bounds)
-    
-            # See if success
-            if not res.success:
-                continue
-    
-            # Store it if better than previous minimum(maximum).
-            if max_fun is None or - res.fun >= max_fun:
-                max_fun = - res.fun
-                res_max = res
+            for x_try in x_seeds:
+                # Find the minimum of minus the acquisition function
+                res = minimize(lambda x: - (__func(x)**2), x_try, bounds=bounds)
+        
+                # See if success
+                if not res.success:
+                    continue
+        
+                # Store it if better than previous minimum(maximum).
+                if max_fun is None or - res.fun >= max_fun:
+                    max_fun = - res.fun
+                    res_max = res
 
         return (max_fun, res_max)
     
     
         
-    def generate(self, sp = Space(), batch_size =1, do_clipping = True, calc_grad = False, verbose = False):
+    def generate(self, sp = Space(), batch_size =1, n_warm_up = 10000, n_iter = 0, do_clipping = True, calc_grad = False, verbose = False):
 
         random_state = check_random_state_instance(self.random_state)
-        
+
         points_list = []
         sizes = []
         grad_list = []
@@ -171,11 +155,15 @@ class CoxLowRankSpatialModel() :
         max_len = 0
         
         for b in range(batch_size) :
-            self.fit()
-            lambdaMax = self.__optimizeBound(sp = sp)[0]
-            full_points  = HomogeneousSpatialModel(lambdaMax * sp.measure(), random_state= random_state).generate(sp)
+            self.sample()
+            lambdaMax = self.__optimizeBound(n_warm_up = n_warm_up, n_iter = n_iter, sp = sp)[0]
             
-            lambdas =  self.lrgp_.func(tf.constant(full_points, dtype=float_type))**2
+            if lambdaMax > 1000 :
+                raise ValueError("OOM Lambda:= " + str(lambdaMax))
+ 
+            full_points  = HomogeneousSpatialModel(lambdaMax * sp.measure, random_state= random_state).generate(sp)
+      
+            lambdas =  self.lrgp.func(tf.constant(full_points, dtype=float_type))**2
             lambdas = lambdas.numpy()
             
             n_lambdas = lambdas.shape[0]
@@ -193,9 +181,11 @@ class CoxLowRankSpatialModel() :
             sizes.append(n_points)
             
             if calc_grad :
-               out, grad = self.lrgp_.likelihood_grad(retained_points, 
-                                                      lplus = sp._higher_bounds, 
-                                                      lminus = sp._lower_bounds)
+               out, grad = self.likelihood_grad(
+                   retained_points, 
+                   lplus = sp._higher_bounds, 
+                   lminus = sp._lower_bounds
+                   )
                
                loglik .append(out)
                grad_list.append(grad)
@@ -217,39 +207,43 @@ class CoxLowRankSpatialModel() :
     
     
 
-def print_points(x1, x2 = None):
+def print_points(x1):
     plt.scatter(x1[:,0], x1[:,1], edgecolor='b', facecolor='none', alpha=0.5 );
-    
-    if x2 is not None :
-        plt.scatter(x2[:,0], x2[:,1], edgecolor='r', facecolor='none', alpha=0.5 );
-        
-    plt.xlabel("x"); plt.ylabel("y");
+    plt.xlim(-1, 1); plt.ylim(-1, 1)
+    plt.xlabel("x"); plt.ylabel("y")
     plt.show()
     
     
     
 if __name__ == "__main__":
-    rng = np.random.RandomState(40)
-    variance = tf.Variable(5.0, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-    p = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = 500, random_state = rng)
-    p.fit()
+    rng = np.random.RandomState()
+
+    variance = tf.Variable(5, dtype=float_type, name='sig')
+    length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
     
-    X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
+    X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
     
-    out, grad = p.lrgp_.likelihood_grad(X, 
-                            lplus = 1.0, 
-                            lminus = 0.0)
+    space = Space(-1,1)
+    bounds = space.bounds
+    
+    lrgp = LowRankRFF(length_scale , variance, n_components = 250, random_state = rng).fit()
+
+    #kernel = gfk.SquaredExponential(variance= variance ** 2 , lengthscales= length_scale)
+    #lrgp = LowRankNystrom(kernel, n_components = 250, random_state = rng, noise = 1e-5, mode = 'sampling').fit()
+    
+    p = CoxLowRankSpatialModel(lrgp, random_state = rng)
+    data = p.generate(verbose = False, sp = space) #, calc_grad = True)
+
+    out, grad = p.likelihood_grad(X)
     
     print(out)
     print(grad)
-    
-    
-    
-    #space = Space(-1,1)
-    #data = p.generate(batch_size  = 10, verbose = True, sp = space)
-    
-    
+    print(data.sizes)
+
+    print_points(data.locs[0])
+    p.lrgp.plot_surface()
+
+
     
 
 

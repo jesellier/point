@@ -8,23 +8,24 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 
 from point.point_process import CoxLowRankSpatialModel, Space
+from point.low_rank_rff import LowRankRFF
+from point.low_rank_nystrom import LowRankNystrom
 
 directory = "D:\GitHub\point\data"
 
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 rng = np.random.RandomState(40)
 
-variance = tf.Variable(5.0, dtype=float_type, name='sig')
-
-length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
-       
 space = Space(-1,1) 
-p = CoxLowRankSpatialModel(length_scale=length_scale, variance = variance, n_components = 500, random_state = rng)
-data = p.generate(sp = space, batch_size  = 100, verbose = True)
+variance = tf.Variable(5.0, dtype=float_type, name='sig')
+length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
+
+lrgp = LowRankRFF(length_scale , variance,  n_components = 500, random_state = rng).fit()
+p = CoxLowRankSpatialModel(lrgp, random_state = rng)
+data = p.generate(sp = space, n_warm_up = 10000, n_iter = 30, batch_size  = 1000, verbose = True)
 
 directory = "D:\GitHub\point\data"
-np.save(directory + "\data_synth_points.npy", data._locs)
-np.save(directory + "\data_synth_sizes.npy", data._sizes)
-np.save(directory + "\data_synth_variables.npy", data._variables)
-np.save(directory + "\data_synth_space.npy", data._space)
+np.save(directory + "\data_synth_points.npy", data.locs)
+np.save(directory + "\data_synth_sizes.npy", data.sizes)
+np.save(directory + "\data_synth_variables.npy", data.variables)
+np.save(directory + "\data_synth_space.npy", data.space)
