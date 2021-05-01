@@ -13,6 +13,7 @@ float_type = tf.dtypes.float64
 from point.point_process import CoxLowRankSpatialModel, Space
 from point.low_rank_rff import LowRankRFF
 from point.low_rank_nystrom import LowRankNystrom
+from point.helper import get_process, method
 
 import gpflow.kernels as gfk
 
@@ -27,39 +28,35 @@ rng = np.random.RandomState()
 
 ####### HYPER PARAMETERS
 num_epochs = 1
-num_iter = 10
+num_iter = 1000
 
 batch_learner_size = 50
-batch_expert_size = None
-n_components = 250 #RFF sampling order
+batch_expert_size = 50
+n_components = 250 
 
 ####### INIT
 num_experts = expert_seq.shape[0]
     
-tf.random.set_seed(10)
-variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sig')
-length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
+#tf.random.set_seed(10)
+#variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sig')
+#length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
 
-variance = tf.Variable([3.0], dtype=float_type, name='sig')
-length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
+variance = tf.Variable([2.0], dtype=float_type, name='sig')
+length_scale = tf.Variable([0.2,0.8], dtype=float_type, name='l')
 
 ######## INSTANTIATE MODEL
 
 space = Space(lower_bounds = expert_space[0], higher_bounds = expert_space[1])
-lrgp = LowRankRFF(length_scale , variance, n_components =  n_components, random_state = rng).fit()
-#kernel = gpflow.kernels.SquaredExponential(variance= variance , lengthscales= length_scale)
-#lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = rng, noise = 1e-5, mode = 'sampling').fit()
-model = CoxLowRankSpatialModel(lrgp, random_state = rng)
-
+method = method.RFF
+model = get_process(length_scale, variance, method, n_components = 250, random_state = rng )
 
 ######## LEARNING HYPER
 reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=float_type),name='ExponentiatedQuadratic')
 
-#initial_learning_rate = 0.8
-initial_learning_rate = 0.4
+initial_learning_rate = 0.8
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate,
-    decay_steps= 10,
+    decay_steps= 20,
     decay_rate=0.9,
     staircase=True
     )
@@ -118,7 +115,7 @@ for epoch in range(num_epochs):
             batch_expert_locs = expert_seq[shuffled_ids]
 
         # generate learner samples
-        learner_data = model.generate(sp = space, batch_size = batch_learner_size, calc_grad = True, verbose = False)
+        learner_data = model.generate(space = space, batch_size = batch_learner_size, calc_grad = True, verbose = False)
         batch_learner_locs = learner_data.locs
         
         # compute rewards
@@ -136,7 +133,7 @@ for epoch in range(num_epochs):
         grads = tf.clip_by_global_norm(grads, 1, use_norm=None, name=None)[0]
         
         #grads[1] = tf.constant([0.0], dtype=float_type)
-        grads[0] = tf.constant([0.0,0.0], dtype=float_type)
+        #grads[0] = tf.constant([0.0,0.0], dtype=float_type)
   
         #compute log likelihood
         #loglik =  tf.math.reduce_sum(tf.stack(learner_data._loglik) / batch_learner_size, axis = 0)

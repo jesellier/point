@@ -5,7 +5,7 @@ Created on Fri Jan 15 13:36:21 2021
 @author: jesel
 """
 import numpy as np
-import scipy as scp
+#import scipy as scp
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -16,47 +16,22 @@ float_type = tf.dtypes.float64
 
 import gpflow.kernels as gfk
 
-from sklearn.gaussian_process.kernels import RBF
+#from sklearn.gaussian_process.kernels import RBF
 
 from point.utils import check_random_state_instance
 from point.misc import Space
 import matplotlib.pyplot as plt
 
-
-def eigvalsh_to_eps(spectrum, cond=None, rcond=None):
-        """
-        Determine which eigenvalues are "small" given the spectrum.
-        This is for compatibility across various linear algebra functions
-        that should agree about whether or not a Hermitian matrix is numerically
-        singular and what is its numerical matrix rank. This is designed to be compatible with scipy.linalg.pinvh.
-        Parameters
-        ----------
-        spectrum : 1d ndarray
-            Array of eigenvalues of a Hermitian matrix.
-        cond, rcond : float, optional
-            Cutoff for small eigenvalues.
-            Singular values smaller than rcond * largest_eigenvalue are
-            considered zero.
-            If None or -1, suitable machine precision is used.
-        Returns
-        -------
-        eps : float
-            Magnitude cutoff for numerical negligibility.
-        """
-        if rcond is not None:
-            cond = rcond
-        if cond in [None, -1]:
-            t = spectrum.dtype.char.lower()
-            factor = {'f': 1E3, 'd': 1E6}
-            cond = factor[t] * np.finfo(t).eps
-        eps = cond * np.max(abs(spectrum))
-        return eps
-    
+from enum import Enum
 
 
 class LowRankNystrom():
     
-    
+    class mode(Enum):
+        SAMPLING = 1
+        GRID = 2
+
+
     def __init__(self, kernel, n_components = 250, random_state = None, noise = 1e-5, mode = 'sampling'):
         
         self.kernel = kernel
@@ -65,7 +40,12 @@ class LowRankNystrom():
         self.is_fitted = False
         
         self.random_state = random_state
-        self.mode = mode
+        
+        if mode == 'sampling' :
+            self.mode = LowRankNystrom.mode.SAMPLING
+        else :
+            self.mode = LowRankNystrom.mode.GRID
+            
         
         self._noise = noise
         
@@ -93,9 +73,9 @@ class LowRankNystrom():
         random_state = check_random_state_instance(self.random_state)
         self.latent_ = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=float_type, name='beta')
         
-        if self.mode == "sampling" :
+        if self.mode == LowRankNystrom.mode.SAMPLING :
             self.__sample_x(sp)
-        elif self.mode == "grid" :
+        elif self.mode == LowRankNystrom.mode.GRID :
             self.__grid_x(sp)
         else :
             raise ValueError("Mode not recognized")
@@ -114,16 +94,26 @@ class LowRankNystrom():
         
         
     def __grid_x(self, sp):
+        
+        random_state = check_random_state_instance(self.random_state)
+        
         bounds = sp.bounds
-        step = 1/np.sqrt(self.n_components )
+        step = 1/np.sqrt(self.n_components)
         x = np.arange(bounds[0,0], bounds[0,1], step)
         y = np.arange(bounds[1,0], bounds[1,1], step)
         X, Y = np.meshgrid(x, y)
-    
-        n = X.shape[0]**2
-        inputs = np.zeros((n,2))
+        
+        n_elements = X.shape[0]**2
+        inputs = np.zeros((n_elements ,2))
         inputs[:,0] = np.ravel(X)
         inputs[:,1] = np.ravel(Y)
+        
+        if n_elements != self.n_components :
+            shuffled_idx = np.arange(n_elements)
+            random_state.shuffle(shuffled_idx)
+            shuffled_idx = shuffled_idx[- self.n_components :]
+            inputs = inputs[shuffled_idx]
+        
         sample = tf.constant(inputs, dtype=float_type, name='x')
         self._x = sample
         
@@ -134,13 +124,7 @@ class LowRankNystrom():
         self._lambda, U, V = tf.linalg.svd(K)
         self._v  = U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) 
 
-        #eps = eigvalsh_to_eps(s, None, None)
-        #if np.min(s) < -eps:
-            #raise ValueError('the input matrix must be positive semidefinite')
-        #d = s[s > eps]
-        #if len(d) < len(s) and not self._allow_singular:
-            #raise np.linalg.LinAlgError('singular matrix')
-            
+
       
     def inv(self):
         if not self.is_fitted :
@@ -157,7 +141,7 @@ class LowRankNystrom():
     def kernel(self, X):
         if not self.is_fitted :
             raise ValueError("instance not fitted")
-        K = self.kernel(X, self._x)
+            K = self.kernel(X, self._x)
         return K @ self.inv() @ tf.transpose(K)
         
 
@@ -191,14 +175,14 @@ class LowRankNystrom():
         inputs = np.zeros((n,2))
         inputs[:,0] = np.ravel(X)
         inputs[:,1] = np.ravel(Y)
-        
+
         zs = np.array(self.func(X = inputs)**2)
         Z = zs.reshape(X.shape)
-    
-        ax.plot_surface(X, Y, Z)
-        ax.set_xlabel('X Label')
-        ax.set_ylabel('Y Label')
-        ax.set_zlabel('Z Label')
+        
+        ax.plot_surface(X, Y, Z) 
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_zlabel('Intensity')
         
         plt.show()
         pass
@@ -209,64 +193,18 @@ class LowRankNystrom():
 if __name__ == "__main__":
 
     rng  = np.random.RandomState()
-    variance = tf.Variable(0.5, dtype=float_type, name='sig')
+    variance = tf.Variable(5, dtype=float_type, name='sig')
     length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='lenght_scale')
-    
-    # noise = 1e-5
-    n_components = 250
-    
-    # sp = Space()
+
     X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
     kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
-    nyst = LowRankNystrom(kernel, n_components , random_state=rng).fit()
-    nyst.plot_surface()
-    nyst.sample()
-
-    x_tries = rng.uniform([-1,-1], [1,1] , size=(10000, 2))
-    fs = nyst.func(tf.constant(x_tries, dtype=float_type))**2
-    fs = fs.numpy()
+    lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
     
-    # noise = 1e-5
-    # n_components = 250
-    
-    # sp = Space()
-    X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
-    
+    lrgp.plot_surface()
+    lrgp.sample()
 
 
-    # K1 = kernel(X,X).numpy()
-    
-    # nyst = LowRankNystrom(kernel, n_components , random_state=rng)
-    # nyst.sample()
-    # #nyst.fit()
-    
-    # x = nyst._LowRankNystrom__x
-    # Kxx = kernel(x, x)
-    # Kxx = Kxx + tf.eye(Kxx.shape[0], dtype=float_type) * tf.constant(noise, dtype=float_type) 
-    # s, U, V = tf.linalg.svd(Kxx)
-    # v = U @ tf.linalg.diag(1/tf.math.sqrt(s)) 
 
-    # beta = tf.constant(rng.normal(size = (n_components, 1)), dtype=float_type, name='beta')
-    # vl = v @ beta
-    
-    # Kx = kernel(X, x)
-    # func = Kx @ vl
-
-    # inv = v @ tf.transpose(v)
-    
-    # K = Kx @ inv @ tf.transpose(Kx)
-    
-    # out = (inv @ Kxx) #+ 2 * (kernel.trainable_parameters[1])
-   
-    
-    
-    
-    
-    # #######################
-    # # compare with sklearn
-    
-    # kernel2 =  0.5 * RBF([0.5, 100])
-    # K2 = kernel2(X)
     
     # ################
     # Kxx2 = kernel2(x,x)

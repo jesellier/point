@@ -79,8 +79,8 @@ class Test_Gradient(unittest.TestCase):
         grad_variance = grad[1].numpy()
         true_value = (out/variance).numpy()
         
-        #grad_adj = (tf.exp(variance) / (tf.exp(variance) - 1)).numpy()
-        grad_adj = 1.0
+        grad_adj = (tf.exp(variance) / (tf.exp(variance) - 1)).numpy()
+        #grad_adj = 1.0
 
         self.assertAlmostEqual(true_value , grad_variance * grad_adj, places=7)
         
@@ -101,10 +101,10 @@ class Test_Gradient(unittest.TestCase):
         z = p.lrgp.z_
         beta = p.lrgp.beta_
         
-        #variance = Parameter(self.variance, transform=positive())
-        #length_scale = Parameter(self.length_scale, transform=positive())
-        variance = self.variance
-        length_scale = self.length_scale
+        variance = Parameter(self.variance, transform=positive())
+        length_scale = Parameter(self.length_scale, transform=positive())
+        #variance = self.variance
+        #length_scale = self.length_scale
 
         with tf.GradientTape() as tape:  
             gamma = 1 / (2 * length_scale **2 )       
@@ -112,8 +112,8 @@ class Test_Gradient(unittest.TestCase):
             w = tf.linalg.diag(gamma)  @ z  
             mat = integral_mat_recalc(w, b, R, lplus = 1.0, lminus = 0)
             out2 = variance * tf.transpose(beta) @ mat @ beta
-        #grad2 = tape.gradient(out2, length_scale.trainable_variables[0]) 
-        grad2 = tape.gradient(out2, length_scale) 
+        grad2 = tape.gradient(out2, length_scale.trainable_variables[0]) 
+        #grad2 = tape.gradient(out2, length_scale) 
 
         self.assertAlmostEqual(out.numpy(), out2.numpy(), places=7)
         for g in zip(grad.numpy(), grad2.numpy()):

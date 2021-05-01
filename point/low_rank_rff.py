@@ -187,9 +187,9 @@ class LowRankRFF():
         Z = zs.reshape(X.shape)
     
         ax.plot_surface(X, Y, Z)
-        ax.set_xlabel('X Label')
-        ax.set_ylabel('Y Label')
-        ax.set_zlabel('Z Label')
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_zlabel('Instensity')
         
         plt.show()
         pass
@@ -200,13 +200,13 @@ class LowRankRFF():
 if __name__ == '__main__':
     rng = np.random.RandomState()
 
-    variance = tf.Variable(0.5, dtype=float_type, name='sig')
+    variance = tf.Variable(5, dtype=float_type, name='sig')
     length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='lenght_scale')
 
     gp = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng)
     gp.fit()
    
-    #gp.plot_surface()
+    gp.plot_surface()
 
     #TEST
     # with tf.GradientTape() as tape:  
