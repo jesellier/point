@@ -12,15 +12,12 @@ tfd = tfp.distributions
 
 float_type = tf.dtypes.float64
 
-import gpflow
+from gpflow.base import Parameter
 from gpflow.utilities import positive
+from gpflow.utilities.ops import  square_distance
 
 from point.utils import check_random_state_instance, transformMat
 import matplotlib.pyplot as plt
-
-from gpflow.base import Parameter
-from gpflow.utilities import positive
-
 
 rng = np.random.RandomState(40)
 
@@ -36,10 +33,7 @@ class LowRankRFF():
         
         self._length_scale = Parameter(length_scale , transform=positive())
         self._variance =  Parameter(variance, transform=positive())
-        #self._length_scale = Parameter(length_scale)
-        #self._variance =  Parameter(variance)
-        #self._length_scale = length_scale
-        #self._variance =  variance
+
         
     
     @property
@@ -49,8 +43,14 @@ class LowRankRFF():
         
     @property
     def trainable_variables(self):
+        l = []
+        if self._length_scale.trainable:
+            l.append(self._length_scale.trainable_variables[0])
+        if self._variance.trainable :
+            l.append(self._variance.trainable_variables[0])
+            
         #return (self._length_scale , self._variance)
-        return (self._length_scale.trainable_variables[0] , self._variance.trainable_variables[0])
+        return tuple(l)
     
         
     
@@ -67,7 +67,6 @@ class LowRankRFF():
         
         if sample : self.sample()
 
-        #self._length_scale, self._variance =  trainable_variables
         gamma = 1 / (2 * self._length_scale **2 )
         self.random_weights_=  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ self.z_
         self.is_fitted = True
@@ -111,7 +110,7 @@ class LowRankRFF():
 
     
     def integral(self, lplus = 1.0, lminus = 0):
-        #self.fit((self._length_scale, self._variance), sample = False)
+
         mat = self.__integral_mat(lplus, lminus)
         out = tf.transpose(self.beta_) @ mat @ self.beta_
         out = out[0][0]
@@ -120,7 +119,7 @@ class LowRankRFF():
     
     
     def likelihood(self, X, lplus = 1.0, lminus = 0):
-        #self.fit((self._length_scale, self._variance), sample = False)
+        
         mat = self.__integral_mat(lplus, lminus)
 
         int_term = tf.transpose(self.beta_) @ mat @ self.beta_
@@ -193,6 +192,28 @@ class LowRankRFF():
         
         plt.show()
         pass
+    
+    
+    def plot_kernel(self):
+        plt.figure()
+        x = np.arange(-1.0, 1.0, 0.0255)
+        
+        n = len(x)
+        origin = inputs = np.zeros((n,2))
+        inputs[:,1] = x
+
+        r = square_distance(origin, inputs)
+        k = self.kernel(inputs)
+
+        ax = plt.axes()
+        x = r[:,0].numpy()
+        y = k[:,0].numpy()
+        ax.plot(x, y)
+        
+        plt.xlabel("distance")
+        plt.ylabel("kernel");
+        plt.show()
+        pass
         
         
 
@@ -201,22 +222,14 @@ if __name__ == '__main__':
     rng = np.random.RandomState()
 
     variance = tf.Variable(5, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='lenght_scale')
+    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='lenght_scale')
 
-    gp = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng)
-    gp.fit()
-   
-    gp.plot_surface()
+    lrgp = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng)
+    lrgp.fit()
+        
+    lrgp.plot_kernel()
+    lrgp.plot_surface()
 
-    #TEST
-    # with tf.GradientTape() as tape:  
-    #     out = gp.integral()
-    # grad = tape.gradient(out, gp._length_scale)
-
-    
-    
-    
-    
 
 
     

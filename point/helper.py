@@ -21,25 +21,49 @@ import gpflow.kernels as gfk
 from enum import Enum
 
 
+def default_parameters():
+    
+    variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma1')
+    length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
+    
+    variance2 = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma2')
+    offset = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma2')
+
+    return {'variance': variance, 'length_scale' : length_scale, 'variance2' : variance2, 'offset' : offset }
+
+
 class method(Enum):
     NYST = 1
     RFF = 2
     NYST_SAMPLING = 3
     NYST_GRID = 4
+    COMP_POLY = 5
 
 
-def get_process(length_scale, variance, method =method.RFF, n_components = 250, random_state = None ):
+def get_process(method =method.RFF, n_components = 250, random_state = None, **kwargs):
+
+    length_scale = kwargs['length_scale']
+    variance = kwargs['variance']
     
     if method == method.RFF :
         lrgp = LowRankRFF(length_scale, variance, n_components =  n_components, random_state = random_state).fit()
     
     elif method == method.NYST or method == method.NYST_GRID :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state, noise = 1e-5, mode = 'grid').fit()
+         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state).fit()
     
     elif method == method.NYST or method == method.NYST_SAMPLING :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state, noise = 1e-5, mode = 'sampling').fit()
+         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state, mode = 'sampling').fit()
+
+    elif method == method.COMP_POLY :
+         
+        variance2 = kwargs['variance_poly']
+        offset = kwargs['offset']
+        
+        poly =  gfk.Polynomial(degree=2.0, variance= variance2, offset= offset)
+        comp = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  poly
+        lrgp = LowRankNystrom(kernel = comp, n_components =  n_components, random_state = random_state).fit()
     
     else : raise ValueError("enum not recognized")
 

@@ -33,11 +33,16 @@ class PointsData():
         self.loglik = loglik
         self.variables = trainable_variables
         
-    def plot_points(self, index = 0):
-        plt.scatter(self.locs[0][:,0], self.locs[0][:,1], edgecolor='b', facecolor='none', alpha=0.5 );
+    def plot_points(self, batch_index = 0):
+        size = self.sizes[batch_index]
+        plt.scatter(self.locs[batch_index][0:size,0], self.locs[batch_index][0:size,1], edgecolor='b', facecolor='none', alpha=0.5 );
         plt.xlim(-1, 1); plt.ylim(-1, 1)
         plt.xlabel("x1"); plt.ylabel("x2")
         plt.show()
+        
+    def points(self, batch_index =0 ):
+        size = self.sizes[batch_index]
+        return self.locs[batch_index][0:size,:]
             
         
 class TransformerLogExp():
@@ -158,14 +163,16 @@ class CoxLowRankSpatialModel() :
         loglik = []
         
         max_len = 0
+        n_gen = 0
         
-        for b in range(batch_size) :
+        while n_gen < batch_size :
             self.sample()
             
             lambdaMax = self.__optimizeBound(n_warm_up = n_warm_up, n_iter = n_iter, space = space)[0]
             
             if lambdaMax > 1000 :
-                raise ValueError("OOM Lambda:= " + str(lambdaMax))
+                print("OOM : generation skipped, cause Lambda:= " + str(lambdaMax))
+                continue
  
             full_points  = HomogeneousSpatialModel(lambdaMax * space.measure, random_state= random_state).generate(space)
       
@@ -198,7 +205,9 @@ class CoxLowRankSpatialModel() :
 
             if verbose :
                 print("[%s] %d-th sequence generated: %d raw samples. %d samples have been retained. " % \
-                      (arrow.now(), b+1, n_lambdas, n_points), file=sys.stderr)
+                      (arrow.now(), n_gen+1, n_lambdas, n_points), file=sys.stderr)
+                    
+            n_gen += 1
                     
         # padding for the output
         points = np.zeros((batch_size, max_len, 2))
@@ -206,7 +215,7 @@ class CoxLowRankSpatialModel() :
             points[b, :points_list[b].shape[0]] = points_list[b]
         
         return PointsData(sizes, points, [space._lower_bounds, space._higher_bounds],
-                          np.array(self.trainable_variables, dtype=object), 
+                          np.array(self.parameters, dtype=object), 
                           loglik, 
                           np.array(grad_list, dtype=object)
                           )
@@ -219,27 +228,27 @@ class CoxLowRankSpatialModel() :
     
 if __name__ == "__main__":
     
-    rng = np.random.RandomState()
+    rng = np.random.RandomState(10)
     sp = Space(-1,1)
 
     variance = tf.Variable(5, dtype=float_type, name='sig')
     length_scale = tf.Variable([2, 2], dtype=float_type, name='l')
         
-    lrgp1 = LowRankRFF(length_scale, variance, n_components = 1000, random_state = rng).fit()
+    lrgp1 = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng).fit()
     processRFF = CoxLowRankSpatialModel(lrgp1, random_state = rng)
         
     kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
     lrgp2 = LowRankNystrom(kernel, n_components = 250, random_state = rng, noise = 1e-5, mode = 'grid').fit()
     processNYST = CoxLowRankSpatialModel(lrgp2, random_state = rng)
 
-    process = processRFF
-    data = process.generate(verbose = False, n_warm_up = 10000, n_iter = 2, space = sp) #, calc_grad = True)
+    process = processNYST
+    data = process.generate(verbose = False, batch_size = 2, n_warm_up = 10000, space = sp, calc_grad = True)
     
-    #X =tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
-    #out, grad = pprocess.likelihood_grad(X)
-
-    data.plot_points()
-    process.lrgp.plot_surface()
+    points = data.points(batch_index = 0)
+    X =tf.constant(points, dtype=float_type, name='X')
+    out, grad = process.likelihood_grad(X, 1.0, -1.0)
+    
+    
 
 
         

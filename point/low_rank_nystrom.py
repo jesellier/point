@@ -15,6 +15,7 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 
 import gpflow.kernels as gfk
+from gpflow.utilities.ops import  square_distance
 
 #from sklearn.gaussian_process.kernels import RBF
 
@@ -32,7 +33,7 @@ class LowRankNystrom():
         GRID = 2
 
 
-    def __init__(self, kernel, n_components = 250, random_state = None, noise = 1e-5, mode = 'sampling'):
+    def __init__(self, kernel, n_components = 250, random_state = None, noise = 1e-5, mode = 'grid'):
         
         self.kernel = kernel
         self.n_components = n_components
@@ -160,7 +161,7 @@ class LowRankNystrom():
         sum_term = tf.norm(f)
         sum_term = tf.math.square(sum_term)
             
-        out = - int_term + sum_term
+        out = sum_term - int_term
         
         return out
     
@@ -183,7 +184,28 @@ class LowRankNystrom():
         ax.set_xlabel('x1')
         ax.set_ylabel('x2')
         ax.set_zlabel('Intensity')
+        plt.show()
+        pass
+    
+    
+    def plot_kernel(self):
+        plt.figure()
+        x = np.arange(-1.0, 1.0, 0.0255)
         
+        n = len(x)
+        origin = inputs = np.zeros((n,2))
+        inputs[:,1] = x
+
+        r = square_distance(origin, inputs)
+        k = self.kernel(inputs)
+
+        ax = plt.axes()
+        x = r[:,0].numpy()
+        y = k[:,0].numpy()
+        ax.plot(x, y)
+        
+        plt.xlabel("distance")
+        plt.ylabel("kernel");
         plt.show()
         pass
 
@@ -200,10 +222,9 @@ if __name__ == "__main__":
     kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
     lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
     
+    lrgp.plot_kernel()
     lrgp.plot_surface()
-    lrgp.sample()
-
-
+   
 
     
     # ################

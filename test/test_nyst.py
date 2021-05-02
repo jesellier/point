@@ -13,13 +13,7 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 rng = np.random.RandomState(40)
 
-import time
-from point.point_process import Space
-
 import unittest
-
-
-from scipy.optimize import minimize #For optimizing
 from point.helper import method, get_process
 
 

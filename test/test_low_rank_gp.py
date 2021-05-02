@@ -74,7 +74,6 @@ class Test_Integration(unittest.TestCase):
         #self.assertAlmostEqual( integral_out, 1.581768462402246, places=7)
 
 
-
 class Test_Scaling(unittest.TestCase):
     
     def setUp(self):
