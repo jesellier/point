@@ -17,6 +17,7 @@ import unittest
 import copy
 
 from point.low_rank_rff import LowRankRFF
+from point.helper import get_lrgp, method
 
 rng = np.random.RandomState(40)
 
@@ -33,32 +34,36 @@ class Test_Integration(unittest.TestCase):
     def setUp(self):
         self.unit_variance = tf.Variable(1.0, dtype=float_type, name='sig')
         self.length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-        #self.trainable_variables = (length_scale, unit_variance )
+        self.method = method.NYST
         
+        self.lrgp = get_lrgp(method = self.method, length_scale = self.length_scale, 
+                             variance = self.unit_variance, n_components = 250, random_state = rng).fit()
+
     def test_compare_integration1(self): 
         #INTEGRAL time= 1.0
         t = 1.0
-        #trainable_variables = self.trainable_variables
-
-        gp = LowRankRFF(self.length_scale , self.unit_variance, n_components = 1000, random_state = rng).fit()
-        integral_out = gp.integral(lplus = t)
+        integral_out = self.lrgp.integral(lplus = t)
         integral_out = integral_out.numpy()
         
-        #print(get_numerical_integral_benchmark(gp, t))
-        #self.assertAlmostEqual( integral_out, 0.7442700957669496, places=7)
+        integral_recomputed = get_numerical_integral_benchmark(self.lrgp, t)
+        
+        print(integral_out)
+        print(integral_recomputed)
+        #self.assertAlmostEqual( integral_out, integral_recomputed, places=7)
 
 
     def test_compare_integration2(self): 
         #INTEGRAL time= 5.0
-        t = 5.0
-        #trainable_variables = self.trainable_variables
-         
-        gp = LowRankRFF(self.length_scale , self.unit_variance, n_components = 1000, random_state = rng).fit()
-        integral_out = gp.integral(lplus = t)
+        t = 2.0
+        integral_out = self.lrgp.integral(lplus = t)
         integral_out = integral_out.numpy()
         
-        #print(get_numerical_integral_benchmark(gp, t))
-        #self.assertAlmostEqual( integral_out, 23.20454939449, places=7)
+        integral_recomputed = get_numerical_integral_benchmark(self.lrgp, t)
+  
+        print(integral_out)
+        print(integral_recomputed)
+        #self.assertAlmostEqual( integral_out, integral_recomputed, places=7)
+        
         
     def test_compare_integration3(self): 
         #INTEGRAL time= 1.0 variance = 2.0
@@ -66,12 +71,17 @@ class Test_Integration(unittest.TestCase):
         length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
         variance =  tf.Variable(2.0, dtype=float_type, name='sig')
         
-        gp = LowRankRFF(length_scale , variance, n_components = 1000, random_state = rng).fit()
+        gp = get_lrgp(method = self.method, length_scale = length_scale, 
+                             variance = variance, n_components = 250, random_state = rng).fit()
+        
         integral_out = gp.integral(lplus = t)
         integral_out = integral_out.numpy()
         
-        #print(get_numerical_integral_benchmark(gp, t))
-        #self.assertAlmostEqual( integral_out, 1.581768462402246, places=7)
+        integral_recomputed = get_numerical_integral_benchmark(gp, t)
+        
+        print(integral_out)
+        print(integral_recomputed)
+        #self.assertAlmostEqual( integral_out, integral_recomputed, places=7)
 
 
 class Test_Scaling(unittest.TestCase):

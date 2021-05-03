@@ -34,8 +34,7 @@ class LowRankNystrom():
 
 
     def __init__(self, kernel, n_components = 250, random_state = None, noise = 1e-5, mode = 'grid'):
-        
-        self.kernel = kernel
+
         self.n_components = n_components
         self.n_features = 2
         self.is_fitted = False
@@ -49,16 +48,17 @@ class LowRankNystrom():
             
         
         self._noise = noise
+        self._impl_kernel = kernel
         
         
         
     @property
     def trainable_variables(self):
-        return self.kernel.trainable_variables
+        return self.__impl_kernel.trainable_variables
     
     @property
     def parameters(self):
-        return self.kernel.parameters
+        return self._impl_kernel.parameters
 
         
     def fit(self, sample = True):
@@ -120,13 +120,20 @@ class LowRankNystrom():
         
         
     def __evd(self):
-        K = self.kernel(self._x, self._x)
+        K = self._impl_kernel(self._x, self._x)
         K = K + tf.eye(K.shape[0], dtype=float_type) * tf.constant(self._noise, dtype=float_type) 
         self._lambda, U, V = tf.linalg.svd(K)
         self._v  = U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) 
+        
+    def __validate_entry(self, X):
+        if len(X.shape) == 1:
+            n_features = X.shape[0]
+            X = tf.reshape(X, (1, n_features))
+        else :
+            _, n_features = X.shape
+        return X
 
 
-      
     def inv(self):
         if not self.is_fitted :
             raise ValueError("instance not fitted")
@@ -136,22 +143,23 @@ class LowRankNystrom():
     def func(self, X) :
         if not self.is_fitted :
             raise ValueError("instance not fitted")
-        return self.kernel(X, self._x) @ self._vl
+        
+        X = self.__validate_entry(X)
+        return self._impl_kernel(X, self._x) @ self._vl
 
-    
+
     def kernel(self, X):
         if not self.is_fitted :
             raise ValueError("instance not fitted")
-            K = self.kernel(X, self._x)
+        X = self.__validate_entry(X)
+        K = self._impl_kernel(X, self._x)
         return K @ self.inv() @ tf.transpose(K)
-        
-
     
+
     def integral(self, lplus = 1.0, lminus = 0):
         out = tf.transpose(self.latent_) @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self.latent_
         return out
         
-
     
     def likelihood(self, X, lplus = 1.0, lminus = 0):
         
@@ -162,6 +170,7 @@ class LowRankNystrom():
         sum_term = tf.math.square(sum_term)
             
         out = sum_term - int_term
+        out = out[0][0]
         
         return out
     
@@ -222,9 +231,8 @@ if __name__ == "__main__":
     kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
     lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
     
-    lrgp.plot_kernel()
-    lrgp.plot_surface()
-   
+    print(lrgp.integral())
+
 
     
     # ################

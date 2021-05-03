@@ -21,27 +21,18 @@ import gpflow.kernels as gfk
 from enum import Enum
 
 
-def default_parameters():
-    
-    variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma1')
-    length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
-    
-    variance2 = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma2')
-    offset = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sigma2')
-
-    return {'variance': variance, 'length_scale' : length_scale, 'variance2' : variance2, 'offset' : offset }
-
-
 class method(Enum):
     NYST = 1
     RFF = 2
     NYST_SAMPLING = 3
     NYST_GRID = 4
     COMP_POLY = 5
-
-
-def get_process(method =method.RFF, n_components = 250, random_state = None, **kwargs):
-
+    
+    
+def get_lrgp(method =method.RFF, n_components = 250, random_state = None, **kwargs):
+    
+    lrgp = None
+    
     length_scale = kwargs['length_scale']
     variance = kwargs['variance']
     
@@ -64,8 +55,14 @@ def get_process(method =method.RFF, n_components = 250, random_state = None, **k
         poly =  gfk.Polynomial(degree=2.0, variance= variance2, offset= offset)
         comp = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  poly
         lrgp = LowRankNystrom(kernel = comp, n_components =  n_components, random_state = random_state).fit()
+        
+    return lrgp
+
+
+
+def get_process(method =method.RFF, n_components = 250, random_state = None, **kwargs):
     
-    else : raise ValueError("enum not recognized")
+    lrgp = get_lrgp(method =method , n_components = n_components, random_state = random_state, **kwargs)
 
     return CoxLowRankSpatialModel(lrgp, random_state = random_state)
         

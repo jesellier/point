@@ -34,6 +34,7 @@ class PointsData():
         self.variables = trainable_variables
         
     def plot_points(self, batch_index = 0):
+        plt.figure()
         size = self.sizes[batch_index]
         plt.scatter(self.locs[batch_index][0:size,0], self.locs[batch_index][0:size,1], edgecolor='b', facecolor='none', alpha=0.5 );
         plt.xlim(-1, 1); plt.ylim(-1, 1)
@@ -228,10 +229,10 @@ class CoxLowRankSpatialModel() :
     
 if __name__ == "__main__":
     
-    rng = np.random.RandomState(10)
+    rng = np.random.RandomState()
     sp = Space(-1,1)
 
-    variance = tf.Variable(5, dtype=float_type, name='sig')
+    variance = tf.Variable(8, dtype=float_type, name='sig')
     length_scale = tf.Variable([2, 2], dtype=float_type, name='l')
         
     lrgp1 = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng).fit()
@@ -242,12 +243,10 @@ if __name__ == "__main__":
     processNYST = CoxLowRankSpatialModel(lrgp2, random_state = rng)
 
     process = processNYST
-    data = process.generate(verbose = False, batch_size = 2, n_warm_up = 10000, space = sp, calc_grad = True)
-    
-    points = data.points(batch_index = 0)
-    X =tf.constant(points, dtype=float_type, name='X')
-    out, grad = process.likelihood_grad(X, 1.0, -1.0)
-    
+    data = process.generate(verbose = False, n_warm_up = 10000, space = sp, calc_grad = True)
+    process.lrgp.plot_kernel()
+    process.lrgp.plot_surface()
+    data.plot_points()
     
 
 

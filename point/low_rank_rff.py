@@ -226,9 +226,16 @@ if __name__ == '__main__':
 
     lrgp = LowRankRFF(length_scale, variance, n_components = 250, random_state = rng)
     lrgp.fit()
+    
+    X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
+    
+    x = tf.constant([0.1,0.1], dtype=float_type)
+    print(lrgp.func(x))
+    
+    
         
-    lrgp.plot_kernel()
-    lrgp.plot_surface()
+    #lrgp.plot_kernel()
+    #lrgp.plot_surface()
 
 
 
