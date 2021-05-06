@@ -48,6 +48,12 @@ class LowRankRFF(LowRankBase):
             
         #return (self._length_scale , self._variance)
         return tuple(l)
+    
+    #@property
+    #def trainable_variables_shape(self):
+        #l = []
+        
+        
 
 
 

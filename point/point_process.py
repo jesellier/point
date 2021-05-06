@@ -14,11 +14,8 @@ from scipy.optimize import minimize #For optimizing
 
 from point.utils import check_random_state_instance
 from point.low_rank_rff import LowRankRFF
-from point.low_rank_nystrom import LowRankNystrom
 from point.misc import Space
-from point.helper import method, get_process
 
-import gpflow.kernels as gfk
 
 
 class PointsData():
@@ -237,23 +234,12 @@ if __name__ == "__main__":
     
     variance_poly = tf.Variable([4], dtype=float_type, name='sig')
     offset_poly = tf.Variable([0.02], dtype=float_type, name='sig')
+
+    lrgp = LowRankRFF(length_scale, variance, space = sp, n_components =  250, random_state = rng)
+    lrgp.fit()
     
-    method = method.COMP_POLY
-    sp = Space([-1,1])
-    
-    # lrgp = LowRankRFF(length_scale, variance, space = sp, n_components =  250, random_state = rng)
-    # lrgp.fit()
-    
-    # process = CoxLowRankSpatialModel(lrgp, random_state = rng)
-        
-    process = get_process(length_scale = length_scale, variance = variance, 
-                                    method = method,
-                                    space = sp,
-                                    n_components = 250, 
-                                    random_state = rng,
-                                    variance_poly = variance_poly,
-                                    offset_poly = offset_poly
-                                    )
+    process = CoxLowRankSpatialModel(lrgp, random_state = rng)
+
 
     data = process.generate(verbose = False, n_warm_up = 10000, batch_size =1, calc_grad = True)
     #grads = tf.stack(data.grad) 

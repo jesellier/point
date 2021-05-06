@@ -51,7 +51,7 @@ reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.cons
 initial_learning_rate = 0.8
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate,
-    decay_steps= 5,
+    decay_steps= 20,
     decay_rate=0.8,
     staircase=True
     )
