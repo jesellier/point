@@ -9,15 +9,22 @@ import numpy as np
 
 
 class Space():
-    def __init__(self, lower_bounds = 0, higher_bounds = 1):
-        self._bounds = np.array(((lower_bounds,  higher_bounds ), (lower_bounds,  higher_bounds ))) 
-        self._lower_bounds=  lower_bounds
-        self._higher_bounds = higher_bounds
+    def __init__(self, bound = [-1,1]):
+        self._lower_bound =  bound[0]
+        self._higher_bound = bound[1]
         
     
     @property
     def bounds(self):
-        return self._bounds
+        return self.bounds2D
+    
+    @property
+    def bounds2D(self):
+        return np.array([[self._lower_bound,   self._higher_bound ], [ self._lower_bound,  self._higher_bound ]]) 
+    
+    @property
+    def bounds1D(self):
+        return np.array((self._lower_bound,  self._higher_bound )) 
         
     @property
     def measure(self):
@@ -28,13 +35,24 @@ class Space():
         return [(self.__x1Min() + self.__x1Max())/2, (self.__x2Min() + self.__x2Max())/2]
  
     def __x1Min(self):
-        return self._bounds[0][0]
+        return self._lower_bound
     
     def __x1Max(self):
-        return self._bounds[0][1]
+        return self._higher_bound
 
     def __x2Min(self):
-        return self._bounds[1][0]
+        return self._lower_bound
 
     def __x2Max(self):
-        return self._bounds[1][1]  
+        return self._higher_bound 
+    
+    
+    
+if __name__ == "__main__":
+    sp = Space([-1,1])
+    test = sp.bounds
+    print(sp.bounds)
+
+ 
+    
+

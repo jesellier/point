@@ -33,28 +33,33 @@ def get_lrgp(method =method.RFF, n_components = 250, random_state = None, **kwar
     
     lrgp = None
     
+    
     length_scale = kwargs['length_scale']
     variance = kwargs['variance']
     
     if method == method.RFF :
-        lrgp = LowRankRFF(length_scale, variance, n_components =  n_components, random_state = random_state).fit()
+        lrgp = LowRankRFF(length_scale, variance, n_components =  n_components, random_state = random_state)
+        lrgp.fit()
     
     elif method == method.NYST or method == method.NYST_GRID :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state).fit()
+         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state)
+         lrgp.fit()
     
     elif method == method.NYST or method == method.NYST_SAMPLING :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state, mode = 'sampling').fit()
+         lrgp = LowRankNystrom(kernel, n_components =  n_components, random_state = random_state, mode = 'sampling')
+         lrgp.fit()
 
     elif method == method.COMP_POLY :
          
         variance2 = kwargs['variance_poly']
-        offset = kwargs['offset']
+        offset = kwargs['offset_poly']
         
         poly =  gfk.Polynomial(degree=2.0, variance= variance2, offset= offset)
         comp = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  poly
-        lrgp = LowRankNystrom(kernel = comp, n_components =  n_components, random_state = random_state).fit()
+        lrgp = LowRankNystrom(kernel = comp, n_components =  n_components, random_state = random_state)
+        lrgp.fit()
         
     return lrgp
 

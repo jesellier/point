@@ -23,44 +23,47 @@ from point.helper import method, get_process
 
         
 class Check_Optimization():
+
     
-    
-    #def setUp(self):
     def __init__(self):
         rng = np.random.RandomState()
         self.variance = tf.Variable(8, dtype=float_type, name='sig')
         self.length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
         self.method = method.NYST
+        sp = Space([-1,1])
         
-        self.process = get_process(self.length_scale, self.variance, method = self.method, n_components = 250, random_state = rng)
+        self.process = get_process(length_scale = self.length_scale, variance = self.variance, 
+                                   method = self.method,
+                                   space = sp,
+                                   n_components = 250, 
+                                   random_state = rng)
         print(self.process.lrgp)
 
 
     def run(self):
 
         process = self.process
-        sp = Space(-1,1)
-        bounds = sp.bounds
+        bounds = process.space.bounds
   
         #SET1
         t0 = time.time()
-        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 1000, n_iter = 20,space = sp)[0]
+        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 1000, n_iter = 20)[0]
         print("SET1 := %f - in [%f] " % (out, time.time() - t0))
         
         #SET2
         t0 = time.time()
-        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 10000, n_iter = 3,space = sp)[0]
+        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 10000, n_iter = 3)[0]
         print("SET2 := %f - in [%f] " % (out,time.time() - t0))
         
         #SET3
         t0 = time.time()
-        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 10000, n_iter = 0,space = sp)[0]
+        out = process._CoxLowRankSpatialModel__optimizeBound(n_warm_up = 10000, n_iter = 0)[0]
         print("SET3 := %f - in [%f] " % (out,time.time() - t0))
         
         #SET4
         t0 = time.time()
         func = lambda x: - (process.lrgp.func(tf.constant([[x[0], x[1]]], dtype=float_type))[0][0]**2)
-        res = minimize(func, sp.center, bounds=sp.bounds)
+        res = minimize(func, process.space.center, bounds= bounds)
         print("SET4 := %f - in [%f] " % (-res.fun, time.time() - t0))
         
         #BENCH
@@ -75,7 +78,6 @@ class Check_Optimization():
 
 
 if __name__ == '__main__':
-    #unittest.main()
     Check_Optimization().run()
 
  

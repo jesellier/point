@@ -18,9 +18,11 @@ import unittest
 from point.point_process import CoxLowRankSpatialModel
 from point.low_rank_rff import LowRankRFF
 from point.utils import transformMat
+from point.misc import Space
 
 from gpflow.base import Parameter
 from gpflow.utilities import positive
+
 
 
 
@@ -59,11 +61,11 @@ class Test_Gradient(unittest.TestCase):
     
     def setUp(self):
         
-        self.n_components = 2
         self.variance = tf.Variable(2.0, dtype=float_type, name='sig')
         self.length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
         
-        lrgp = LowRankRFF(self.length_scale, self.variance, n_components = 1000, random_state = rng).fit() #.fit((self.length_scale , self.variance))
+        space = Space([0,1])
+        lrgp = LowRankRFF(self.length_scale, self.variance, space = space, n_components = 1000, random_state = rng).fit() 
         self.p = CoxLowRankSpatialModel(lrgp, random_state = rng)
         self.X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
 
@@ -75,7 +77,7 @@ class Test_Gradient(unittest.TestCase):
         variance = self.variance
         X = self.X
 
-        out, grad = p.likelihood_grad(X, lplus = 1.0, lminus = 0.0)
+        out, grad = p.likelihood_grad(X)
         grad_variance = grad[1].numpy()
         true_value = (out/variance).numpy()
         
@@ -91,7 +93,7 @@ class Test_Gradient(unittest.TestCase):
         with tf.GradientTape() as tape:
             #p.lrgp_.fit((length_scale , variance))
             p.lrgp.fit(sample = False)
-            out = p.lrgp.integral(lplus = 1.0, lminus = 0.0)
+            out = p.lrgp.integral()
         
         grad = tape.gradient(out, p.trainable_variables) 
         grad = grad[0]

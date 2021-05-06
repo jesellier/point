@@ -15,46 +15,39 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 
 import gpflow.kernels as gfk
-from gpflow.utilities.ops import  square_distance
 
 #from sklearn.gaussian_process.kernels import RBF
-
 from point.utils import check_random_state_instance
+from point.low_rank_base import LowRankBase
 from point.misc import Space
-import matplotlib.pyplot as plt
+
 
 from enum import Enum
 
 
-class LowRankNystrom():
+class LowRankNystrom(LowRankBase):
     
     class mode(Enum):
         SAMPLING = 1
         GRID = 2
 
 
-    def __init__(self, kernel, n_components = 250, random_state = None, noise = 1e-5, mode = 'grid'):
-
-        self.n_components = n_components
-        self.n_features = 2
-        self.is_fitted = False
+    def __init__(self, kernel, space = Space(), n_components = 250, random_state = None, noise = 1e-5, mode = 'grid'):
         
-        self.random_state = random_state
+        super().__init__(space, n_components, random_state)
+
+        self._noise = noise
+        self._impl_kernel = kernel
         
         if mode == 'sampling' :
             self.mode = LowRankNystrom.mode.SAMPLING
         else :
             self.mode = LowRankNystrom.mode.GRID
             
-        
-        self._noise = noise
-        self._impl_kernel = kernel
-        
-        
-        
+
     @property
     def trainable_variables(self):
-        return self.__impl_kernel.trainable_variables
+        return self._impl_kernel.trainable_variables
     
     @property
     def parameters(self):
@@ -65,43 +58,43 @@ class LowRankNystrom():
         if sample : self.sample()
 
         self.__evd()
-        self._vl = self._v @ self.latent_
-        self.is_fitted = True
+        self._vl =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self.latent_
+        self._is_fitted = True
         
         return self
 
-    def sample(self, sp = Space()):
-        random_state = check_random_state_instance(self.random_state)
+    def sample(self):
+        random_state = check_random_state_instance(self._random_state)
         self.latent_ = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=float_type, name='beta')
         
         if self.mode == LowRankNystrom.mode.SAMPLING :
-            self.__sample_x(sp)
+            self.__sample_x()
         elif self.mode == LowRankNystrom.mode.GRID :
-            self.__grid_x(sp)
+            self.__grid_x()
         else :
             raise ValueError("Mode not recognized")
-            
+  
         self.fit(sample = False)
 
    
-    def __sample_x(self, sp):
+    def __sample_x(self):
         random_state = check_random_state_instance(self.random_state)
-        bounds = sp.bounds
+        bounds = self.space.bounds
         sample = tf.constant(random_state.uniform(bounds[:, 0], bounds[:, 1], size=(self.n_components, self.n_features)), 
                              dtype=float_type, 
                              name='x')
         
         self._x = sample
+
         
+    def __grid_x(self):
         
-    def __grid_x(self, sp):
+        random_state = check_random_state_instance(self._random_state)
+        bounds = self.space.bounds1D
         
-        random_state = check_random_state_instance(self.random_state)
-        
-        bounds = sp.bounds
         step = 1/np.sqrt(self.n_components)
-        x = np.arange(bounds[0,0], bounds[0,1], step)
-        y = np.arange(bounds[1,0], bounds[1,1], step)
+        x = np.arange(bounds[0], bounds[1], step)
+        y = np.arange(bounds[0], bounds[1], step)
         X, Y = np.meshgrid(x, y)
         
         n_elements = X.shape[0]**2
@@ -119,11 +112,12 @@ class LowRankNystrom():
         self._x = sample
         
         
+        
     def __evd(self):
         K = self._impl_kernel(self._x, self._x)
         K = K + tf.eye(K.shape[0], dtype=float_type) * tf.constant(self._noise, dtype=float_type) 
-        self._lambda, U, V = tf.linalg.svd(K)
-        self._v  = U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) 
+        self._lambda, self._U, V = tf.linalg.svd(K)
+        
         
     def __validate_entry(self, X):
         if len(X.shape) == 1:
@@ -135,13 +129,24 @@ class LowRankNystrom():
 
 
     def inv(self):
-        if not self.is_fitted :
+        if not self._is_fitted :
             raise ValueError("instance not fitted")
-        return self._v @ tf.transpose(self._v)
+        return self._U @ tf.linalg.diag(1/self._lambda) @ tf.transpose(self._U)
+    
+    
+    def feature(self, X):
+
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+        
+        X = self.__validate_entry(X)
+        out = self._impl_kernel(X, self._x) @ self._U @ tf.linalg.diag(1/self._lambda)
+
+        return out
     
     
     def func(self, X) :
-        if not self.is_fitted :
+        if not self._is_fitted :
             raise ValueError("instance not fitted")
         
         X = self.__validate_entry(X)
@@ -149,89 +154,63 @@ class LowRankNystrom():
 
 
     def kernel(self, X):
-        if not self.is_fitted :
+        if not self._is_fitted :
             raise ValueError("instance not fitted")
         X = self.__validate_entry(X)
         K = self._impl_kernel(X, self._x)
         return K @ self.inv() @ tf.transpose(K)
     
 
-    def integral(self, lplus = 1.0, lminus = 0):
-        out = tf.transpose(self.latent_) @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self.latent_
+    def integral(self, bounds = None):
+        out = tf.transpose(self.latent_) @ tf.linalg.diag(tf.math.sqrt(self._lambda)) @ self.latent_
+        out =  (self.space.measure / self.n_components) * out
+        out = out[0][0]
         return out
         
     
-    def likelihood(self, X, lplus = 1.0, lminus = 0):
+    def likelihood(self, X, bounds = None):
         
-        int_term = self.integral(lplus, lminus)
+        if bounds is None :
+            bounds = self.space.bounds
+        
+        int_term = self.integral(bounds)
 
         f = self.func(X)
         sum_term = tf.norm(f)
         sum_term = tf.math.square(sum_term)
             
         out = sum_term - int_term
-        out = out[0][0]
         
         return out
-    
-       
-    def plot_surface(self):
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        x = y = np.arange(-1.0, 1.0, 0.05)
-        X, Y = np.meshgrid(x, y)
-    
-        n = X.shape[0]**2
-        inputs = np.zeros((n,2))
-        inputs[:,0] = np.ravel(X)
-        inputs[:,1] = np.ravel(Y)
-
-        zs = np.array(self.func(X = inputs)**2)
-        Z = zs.reshape(X.shape)
-        
-        ax.plot_surface(X, Y, Z) 
-        ax.set_xlabel('x1')
-        ax.set_ylabel('x2')
-        ax.set_zlabel('Intensity')
-        plt.show()
-        pass
-    
-    
-    def plot_kernel(self):
-        plt.figure()
-        x = np.arange(-1.0, 1.0, 0.0255)
-        
-        n = len(x)
-        origin = inputs = np.zeros((n,2))
-        inputs[:,1] = x
-
-        r = square_distance(origin, inputs)
-        k = self.kernel(inputs)
-
-        ax = plt.axes()
-        x = r[:,0].numpy()
-        y = k[:,0].numpy()
-        ax.plot(x, y)
-        
-        plt.xlabel("distance")
-        plt.ylabel("kernel");
-        plt.show()
-        pass
 
     
     
     
 if __name__ == "__main__":
 
-    rng  = np.random.RandomState()
+    rng  = np.random.RandomState(10)
     variance = tf.Variable(5, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='lenght_scale')
+    length_scale = tf.Variable(0.5, dtype=float_type, name='lenght_scale')
 
     X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
     kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
     lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
     
-    print(lrgp.integral())
+   # print(lrgp.integral())
+    #print(lrgp.parameters)
+    print(lrgp.likelihood(X))
+    
+    bounds = lrgp.space.bounds
+    int_term = lrgp.integral(bounds)
+
+    f = lrgp.func(X)
+    sum_term = tf.norm(f)
+    sum_term = tf.math.square(sum_term)
+            
+    out = sum_term - int_term
+    
+    #lrgp.plot_kernel()
+    #lrgp.plot_surface()
 
 
     

@@ -14,6 +14,7 @@ import unittest
 float_type = tf.dtypes.float64
 rng = np.random.RandomState(40)
 from point.low_rank_rff import LowRankRFF
+from point.point_process import Space
 
 
 
@@ -27,8 +28,7 @@ def transformMat(vec, n):
     return (tf.transpose(M) + M, tf.transpose(M)-M)
 
 
-
-def integral_cos_mat(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type)):
+def integral_cos_mat(w, bounds, b = tf.constant(0.0, dtype=float_type)):
     ### w = vector of weights, a = time, b = vector of b
     
     n =  w.shape[0]
@@ -36,6 +36,9 @@ def integral_cos_mat(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type
     (B, D) = transformMat(w[:, 1], n)
     C = tf.linalg.set_diag(C, tf.ones(n,  dtype=float_type)) 
     D = tf.linalg.set_diag(D, tf.ones(n,  dtype=float_type)) 
+    
+    lplus = bounds[1]
+    lminus = bounds[0]
  
     if b.shape == [] :
         b1 = 2 * b
@@ -57,11 +60,13 @@ def integral_cos_mat(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type
     return  0.5 * mat
 
 
-
-def term_plus(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type)):
+def term_plus(w, bounds, b = tf.constant(0.0, dtype=float_type)):
     n =  w.shape[0]
     A,_ = transformMat(w[:, 0], n)
     B,_ = transformMat(w[:, 1], n)
+    
+    lplus = bounds[1]
+    lminus = bounds[0]
  
     mat = (1 / (A * B)) * ( tf.cos(lplus*A + lminus*B + b) + tf.cos(lminus*A + lplus*B + b)  \
                                - tf.cos(lplus*(A + B) + b)  - tf.cos(lminus*(A + B) + b))
@@ -74,10 +79,13 @@ def term_plus(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type)):
     return mat
 
 
-def term_minus(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type)):
+def term_minus(w, bounds, b = tf.constant(0.0, dtype=float_type)):
     n =  w.shape[0]
     _, C = transformMat(w[:, 0], n)
     _, D = transformMat(w[:, 1], n)
+    
+    lplus = bounds[1]
+    lminus = bounds[0]
     
     C = tf.linalg.set_diag(C, tf.ones(n,  dtype=float_type)) 
     D = tf.linalg.set_diag(D, tf.ones(n,  dtype=float_type)) 
@@ -93,10 +101,10 @@ def term_minus(w, lplus, lminus = 0, b = tf.constant(0.0, dtype=float_type)):
 class TestIntegralPart1(unittest.TestCase):
 
     def test_1(self):
-        #TESTS : lplus = 1, lminus = 0;  term = int [cos (w_i + w_j)^T x] = int cos(x1 + x2)
-        lplus = 1.0
+        #TESTS : bound = [0,1];  term = int [cos (w_i + w_j)^T x] = int cos(x1 + x2)
+        bounds = [0, 1.0]
         w = tf.constant([[0.5, 0.5],[0.5, 0.5]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus).numpy()
+        tmp = term_plus(w, bounds).numpy()
         val = tmp[0,1]
         self.assertTrue((tmp == tmp.T).all())
         self.assertAlmostEqual( 4 * np.cos(1) * np.sin(0.5)**2, val, places=7)
@@ -104,20 +112,20 @@ class TestIntegralPart1(unittest.TestCase):
     
     def test_2(self):
         # Add drift : term = int [cos (w_i + w_j)^T x + 2] = int cos(x1 + x2 + 2)
-        lplus = 1.0
+        bounds = [0, 1.0]
         b = tf.constant(2.0, dtype=float_type)
         w = tf.constant([[0.0, 1.0],[1.0, 0.0]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus, b=b).numpy()
+        tmp = term_plus(w, bounds, b=b).numpy()
         val = tmp[0,1]
         self.assertAlmostEqual(4 * np.cos(3) * np.sin(0.5)**2, val, places=7)
         
     
     def test_3(self):
         # New term = int cos(2 *x2 + 2)
-        lplus = 1.0
+        bounds = [0, 1.0]
         b = tf.constant(2.0, dtype=float_type)
         w = tf.constant([[0.0, 0.0],[1.0, 1.0]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus, b=b).numpy()
+        tmp = term_plus(w, bounds, b=b).numpy()
         val = tmp[0,1]
         diag = tmp[1,1]
         self.assertAlmostEqual(4 * np.cos(3) * np.sin(0.5)**2, val, places=7)
@@ -125,46 +133,45 @@ class TestIntegralPart1(unittest.TestCase):
 
 
     def test_4(self):
-        # Add non unit bound : lplus = 5, lminus = 0;   int cos(x1 + x2 + 2 )
-        lplus = 5.0
+        # Add non unit bound : [0,5];   int cos(x1 + x2 + 2 )
+        bounds = [0, 5.0]
         b = tf.constant(2.0, dtype=float_type)
         w = tf.constant([[0.5, 0.5],[0.5, 0.5]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus, b=b).numpy()
+        tmp = term_plus(w, bounds, b=b).numpy()
         val = tmp[0,1]
         self.assertTrue((tmp == tmp.T).all())
         self.assertAlmostEqual(4 * np.cos(7) * np.sin(5/2)**2, val, places=7)
         
     def test_5(self):
-        # Add negative unit bound : lplus = 1, lminus = -1;   int cos(x1 + x2 + 2 )
-        lplus = 1.0
-        lminus = -1.0
+        # Add negative unit bound : [-1,1];   int cos(x1 + x2 + 2 )
+        bounds = [-1, 1]
         b = tf.constant(2.0, dtype=float_type)
         w = tf.constant([[0.5, 0.5],[0.5, 0.5]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus, lminus, b=b).numpy()
+        tmp = term_plus(w, bounds, b=b).numpy()
         val = tmp[0,1]
         self.assertTrue((tmp == tmp.T).all())
         self.assertAlmostEqual(4 * np.cos(2) * np.sin(1)**2, val, places=7)
 
 
     def test_7(self):
-        # More test for completeness : lplus = 5, lminus = 0;  int cos(x1 + 2*x2 )
-        lplus = 5.0
+        # More test for completeness : [0,5];  int cos(x1 + 2*x2 )
+        bounds = [0,5]
         w = tf.constant([[0.5, 1],[0.5, 1]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus).numpy()
+        tmp = term_plus(w, bounds).numpy()
         val = tmp[0,1]
         self.assertTrue((tmp == tmp.T).all())
         self.assertAlmostEqual( ( 2 * np.cos(5) -1) * np.sin(5)**2, val, places=7)
         
             
     def test_8(self):
-        # More test for completeness : lplus = 5, lminus = 0;  int cos(x1 + 2*x2 + 2)
-        lplus = 1.0
+        # More test for completeness : [0,5];  int cos(x1 + 2*x2 + 2)
+        bounds = [0,5]
         b = tf.constant(2.0, dtype=float_type)
         w = tf.constant([[0.5, 1],[0.5, 1]], dtype=float_type, name='w')
-        tmp = term_plus(w, lplus, b=b).numpy()
+        tmp = term_plus(w, bounds, b=b).numpy()
         val = tmp[0,1]
         self.assertTrue((tmp == tmp.T).all())
-        self.assertAlmostEqual( (np.sin(1)*(np.sin(4)-np.sin(3))), val, places=7) 
+        self.assertAlmostEqual( (np.sin(5)*(np.sin(12)-np.sin(7))), val, places=7) 
 
         
         
@@ -172,18 +179,18 @@ class TestIntegralPart2(unittest.TestCase):
 
     def test_1(self):
         # TEST second term when nul
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[0.0, 0.0],[0.0, 0.0]], dtype=float_type, name='w')
         b = tf.constant(2.0, dtype=float_type)
-        val = term_minus(w = w, lplus = lplus, b = b).numpy()
-        self.assertAlmostEqual( np.cos(b.numpy()) * lplus ** 2, val[1,1], places=7)
+        val = term_minus(w = w, bounds = bounds, b = b).numpy()
+        self.assertAlmostEqual( np.cos(b.numpy()) * bounds[1]** 2, val[1,1], places=7)
         
         
     def test_2(self):
         # TEST : term = int cos(x1 + x2)
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[2, 2],[1, 1]], dtype=float_type, name='w')
-        val = term_minus(w = w, lplus = lplus).numpy()
+        val = term_minus(w = w, bounds = bounds).numpy()
 
         self.assertAlmostEqual( 4* np.cos(1) * np.sin(1/2)**2, val[0,1], places=7)
         self.assertAlmostEqual( 1.0, val[1,1], places=7)
@@ -191,20 +198,19 @@ class TestIntegralPart2(unittest.TestCase):
     
     def test_3(self):
         # TEST add drift : term = int cos(x1 + x2 + 2)
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[2, 2],[1, 1]], dtype=float_type, name='w')
         b = tf.constant(2.0, dtype=float_type)
-        val = term_minus(w = w, lplus = lplus, b = b).numpy()
+        val = term_minus(w = w, bounds = bounds, b = b).numpy()
 
         self.assertAlmostEqual( 4* np.cos(3) * np.sin(1/2)**2, val[0,1], places=7)
         
     def test_4(self):
         # TEST add negative bound
-        lplus = 1.0
-        lminus = -1.0
+        bounds = [-1,1]
         w = tf.constant([[2, 2],[1, 1]], dtype=float_type, name='w')
         b = tf.constant(2.0, dtype=float_type)
-        val = term_minus(w = w, lplus = lplus, lminus = lminus, b = b).numpy()
+        val = term_minus(w = w, bounds = bounds, b = b).numpy()
 
         self.assertAlmostEqual( 4* np.cos(2) * np.sin(1)**2, val[0,1], places=7)
         
@@ -213,76 +219,81 @@ class TestIntegralPart2(unittest.TestCase):
         
 class TestFullIntegral(unittest.TestCase):
     
+    def compMat(self, m1, m2):
+        for i in range(m1.shape[0]):
+            for j in range(m1.shape[1]):
+                self.assertAlmostEqual( m1[i,j], m2[i,j] , places=7)
+                
+    
     def setUp(self):
-        variance = tf.ones(1, dtype=float_type)
-        lenghtscale = (tf.ones(2, dtype=float_type))
-        self.gp = LowRankRFF(lenghtscale, variance, n_components = 2, random_state = rng)
-        #self.trainable_variables = (tf.ones(2, dtype=float_type), tf.ones(1, dtype=float_type))
-        self.gp.fit()  #dummy fitting
+        variance = tf.Variable(1, dtype=float_type, name='sig')
+        lenght_scale = tf.Variable([1, 1], dtype=float_type, name='l')
+        space =Space([0,1])
+        self.gp = LowRankRFF(lenght_scale, variance, space= space, n_components = 2, random_state = rng).fit()
 
 
-    #TESTS lplus = 1, lminus = 0; diag_term = int cos(b)cos(x1 + x2 + b)
+    #TESTS bounds = [0,1]; diag_term = int cos(b)cos(x1 + x2 + b)
     def test_1(self):
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[0.0, 0.0],[1.0, 1.0]], dtype=float_type, name='w')
         b = tf.constant(2.0, dtype=float_type)
-        tmp1 = term_plus(w=w, lplus=lplus,b=2*b).numpy()
-        tmp2 = term_minus(w=w, lplus=lplus).numpy()
+        tmp1 = term_plus(w=w, bounds = bounds,b=2*b).numpy()
+        tmp2 = term_minus(w=w, bounds = bounds).numpy()
         
         mat1 = 0.5 * (tmp1 + tmp2 )
-        mat2 =  integral_cos_mat(w = w, lplus = lplus, b = b).numpy()
+        mat2 =  integral_cos_mat(w = w, bounds = bounds, b = b).numpy()
 
         R = self.gp.n_components
         self.gp.random_weights_ = tf.transpose(w)
         self.gp.random_offset_ = b
-        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
+        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(bounds).numpy()
         
         #must process the Nan number in [0][0]
         mat1[np.isnan(mat1)] = np.inf
         mat2[np.isnan(mat2)] = np.inf
         mat3[np.isnan(mat3)] = np.inf
 
-        self.assertTrue((mat2 == mat1).all())
-        self.assertTrue((mat3 == mat2).all())
-        self.assertAlmostEqual(4 * np.cos(3) * np.cos(2) * np.sin(0.5)**2, mat2[1,0], places=7)
+        self.compMat(mat1, mat2)
+        self.compMat(mat2, mat3)
+        self.assertAlmostEqual(4 * np.cos(3) * np.cos(2) * np.sin(0.5)**2, mat3[1,0], places=7)
 
 
     def test_2(self):
-        #TESTS lplus = 1, lminus = 0 ; diag_term = int cos(0.1 * x1 + 0.2 * x2 )cos( 1.0 * x1 +  -2.0 * x2)
-        lplus = 1.0
+        #TESTS bounds = [0,1] ; diag_term = int cos(0.1 * x1 + 0.2 * x2 )cos( 1.0 * x1 +  -2.0 * x2)
+        bounds = [0,1]
         w = tf.constant([[0.1, 0.2],[1.0, -2.0]], dtype=float_type, name='w')
-        tmp1 = term_plus(w, lplus).numpy()
-        tmp2 = term_minus(w, lplus).numpy()
+        tmp1 = term_plus(w, bounds).numpy()
+        tmp2 = term_minus(w, bounds).numpy()
         
         mat1 = 0.5 * (tmp1 + tmp2 )
-        mat2 =  integral_cos_mat(w, lplus).numpy()
+        mat2 =  integral_cos_mat(w, bounds).numpy()
         
         R = self.gp.n_components
         self.gp.random_weights_ = tf.transpose(w)
         self.gp.random_offset_ = tf.constant(0.0, dtype=float_type)
-        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
+        mat3 = R * 0.5 * self.gp._LowRankRFF__integral_mat(bounds).numpy()
   
-        self.assertTrue((mat2 == mat1).all())
-        self.assertTrue((mat3 == mat2).all())
-        self.assertAlmostEqual(mat2[0,0], (1/4) * (-23 + 25 * np.cos(0.2) + 25 * np.cos(2/5) - 25 * np.cos(3/5)), places=7)
-        self.assertAlmostEqual(mat2[1,1], (1/16) * (9 - np.cos(4)) , places=7)
-        self.assertAlmostEqual(mat2[1,0], 0.7002116510508248 , places=7)
+        self.compMat(mat1, mat2)
+        self.compMat(mat2, mat3)
+        self.assertAlmostEqual(mat3[0,0], (1/4) * (-23 + 25 * np.cos(0.2) + 25 * np.cos(2/5) - 25 * np.cos(3/5)), places=7)
+        self.assertAlmostEqual(mat3[1,1], (1/16) * (9 - np.cos(4)) , places=7)
+        self.assertAlmostEqual(mat3[1,0], 0.7002116510508248 , places=7)
         
     
     def test_3(self):
         #TESTS Add drift : diag_term = int cos(0.1 * x1 + 0.2 * x2 + 2)cos( 1.0 * x1 +  -2.0 * x2 + 1)
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[0.1, 0.2],[1.0, -2.0]], dtype=float_type, name='w')
         b = tf.constant([2, 1], dtype=float_type, name='w')
 
-        mat1 =  integral_cos_mat(w, lplus, b=b).numpy()
+        mat1 =  integral_cos_mat(w, bounds, b=b).numpy()
     
         R = self.gp.n_components
         self.gp.random_weights_ = tf.transpose(w)
         self.gp.random_offset_ = b
-        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
+        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(bounds).numpy()
 
-        self.assertTrue((mat2 == mat1).all())
+        self.compMat(mat1, mat2)
         self.assertAlmostEqual(mat2[0,0], 0.3012653529971747, places=7)
         self.assertAlmostEqual(mat2[1,1], 0.6033527263039757, places=7)
         self.assertAlmostEqual(mat2[1,0], -0.39557712896935127 , places=7)
@@ -290,38 +301,39 @@ class TestFullIntegral(unittest.TestCase):
         
     def test_4(self):
         #TESTS neg bound : diag_term = int cos(0.1 * x1 + 0.2 * x2 + 2)cos( 1.0 * x1 +  -2.0 * x2 + 1)
-        lplus = 1.0
-        lminus = -1.0
+        bounds = [-1,1]
         w = tf.constant([[0.1, 0.2],[1.0, -2.0]], dtype=float_type, name='w')
         b = tf.constant([2, 1], dtype=float_type, name='w')
 
-        mat1 =  integral_cos_mat(w, lplus, lminus, b=b).numpy()
+        mat1 =  integral_cos_mat(w, bounds, b=b).numpy()
     
         R = self.gp.n_components
         self.gp.random_weights_ = tf.transpose(w)
         self.gp.random_offset_ = b
-        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(lplus = lplus, lminus = lminus).numpy()
+        self.gp.space = Space([-1,1])
+        
+        mat2 = R * 0.5 * self.gp._LowRankRFF__integral_mat(bounds).numpy()
 
-        self.assertTrue((mat2 == mat1).all())
+        self.compMat(mat1, mat2)
         self.assertAlmostEqual(mat2[0,0], 0.7357636641212484, places=7)
         self.assertAlmostEqual(mat2[1,1], 2.0715937521130385, places=7)
         self.assertAlmostEqual(mat2[1,0], -0.5222545782912589, places=7)
  
     def test_5(self):
         #TESTS a = 1, b = 0 ; int cos(0.1 * x1 + 0.2 * x2 + 2.0 )cos( 1.0 * x1 +  -2.0 * x2 + 3.0)
-        lplus = 1.0
+        bounds = [0,1]
         w = tf.constant([[0.1, 0.2],[1.0, -2.0]], dtype=float_type, name='w')
         b = tf.constant([2.0, 3.0], dtype=float_type, name='b')
-        mat1 =  integral_cos_mat(w=w, lplus=lplus, b=b).numpy()
+        mat1 =  integral_cos_mat(w=w, bounds = bounds, b=b).numpy()
         
         self.gp.random_weights_ = tf.transpose(w)
         self.gp.random_offset_ = b
-        mat2 = self.gp._LowRankRFF__integral_mat(lplus = lplus).numpy()
+        mat2 = self.gp._LowRankRFF__integral_mat(bounds).numpy()
         
-        self.assertTrue((mat2 == mat1).all())
-        self.assertAlmostEqual(mat1[0,0], 0.3012653529971747, places=7)
-        self.assertAlmostEqual(mat1[1,1], 0.5542608460089069 , places=7)
-        self.assertAlmostEqual(mat1[1,0], 0.3420353429585846 , places=7)
+        self.compMat(mat1, mat2)
+        self.assertAlmostEqual(mat2[0,0], 0.3012653529971747, places=7)
+        self.assertAlmostEqual(mat2[1,1], 0.5542608460089069 , places=7)
+        self.assertAlmostEqual(mat2[1,0], 0.3420353429585846 , places=7)
 
 
 if __name__ == '__main__':

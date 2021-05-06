@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May  6 14:41:15 2021
+
+@author: jesel
+"""
+
+
 import numpy as np
 
 import tensorflow as tf
@@ -8,24 +16,25 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 
 from point.helper import get_process, method
-from point.point_process import CoxLowRankSpatialModel, Space
-from point.low_rank_rff import LowRankRFF
-from point.low_rank_nystrom import LowRankNystrom
-
-import gpflow.kernels as gfk
+from point.point_process import Space
 
 directory = "D:\GitHub\point\data"
 
-
 rng = np.random.RandomState(40)
 
-space = Space(-1,1) 
-variance = tf.Variable(5, dtype=float_type, name='sig')
-length_scale = tf.Variable([0.5,0.5], dtype=float_type, name='l')
+space = Space([-1,1]) 
+variance = tf.Variable([8], dtype=float_type, name='sig')
+length_scale = tf.Variable([0.2], dtype=float_type, name='l')
+    
+variance_poly = tf.Variable([4], dtype=float_type, name='sig')
+offset_poly = tf.Variable([0.02], dtype=float_type, name='sig')
 
-method = method.NYST
-p = get_process(method, n_components = 500, length_scale = length_scale, variance = variance, random_state = rng )
-data = p.generate(space = space, n_warm_up = 1000, n_iter = 30, batch_size  = 1, verbose = True)
+method = method.COMP_POLY
+process = get_process(method, space = space, n_components = 500, 
+                      length_scale = length_scale, variance = variance, 
+                      variance_poly = variance_poly , offset_poly = offset_poly,
+                      random_state = rng )
+data = process.generate(n_warm_up = 10000, n_iter = 30, batch_size  = 1000, verbose = True)
 
 directory = "D:\GitHub\point\data"
 np.save(directory + "\data_synth_points.npy", data.locs)

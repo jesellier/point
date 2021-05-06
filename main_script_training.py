@@ -10,12 +10,8 @@ tfk = tfp.math.psd_kernels
 
 float_type = tf.dtypes.float64
 
-from point.point_process import CoxLowRankSpatialModel, Space
-from point.low_rank_rff import LowRankRFF
-from point.low_rank_nystrom import LowRankNystrom
+from point.point_process import Space
 from point.helper import get_process, method
-
-import gpflow.kernels as gfk
 
 #LOAD SYNTH DATA
 directory = "D:\GitHub\point\data"
@@ -24,14 +20,14 @@ expert_variables = np.load(directory + "\data_synth_variables.npy", allow_pickle
 expert_space = np.load(directory + "\data_synth_space.npy", allow_pickle=True)
 print("[{}] SYNTH-DATA variables : {}".format(arrow.now(), expert_variables), file=sys.stderr)
 
-rng = np.random.RandomState()
+rng = np.random.RandomState(5)
 
 ####### HYPER PARAMETERS
 num_epochs = 1
 num_iter = 1000
 
 batch_learner_size = 50
-batch_expert_size = 50
+batch_expert_size = None
 n_components = 250 
 
 ####### INIT
@@ -42,12 +38,12 @@ num_experts = expert_seq.shape[0]
 #length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
 
 variance = tf.Variable([2.0], dtype=float_type, name='sig')
-length_scale = tf.Variable([0.2,0.8], dtype=float_type, name='l')
+length_scale = tf.Variable([0.2], dtype=float_type, name='lengthscale')
 
 ######## INSTANTIATE MODEL
-space = Space(lower_bounds = expert_space[0], higher_bounds = expert_space[1])
+space = Space(expert_space)
 method = method.NYST
-model = get_process(method, n_components = 250, random_state = rng, variance = variance, length_scale = length_scale)
+model = get_process(method, space = space, n_components = 250, random_state = rng, variance = variance, length_scale = length_scale)
 
 ######## LEARNING HYPER
 reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=float_type),name='ExponentiatedQuadratic')
@@ -55,8 +51,8 @@ reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.cons
 initial_learning_rate = 0.8
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate,
-    decay_steps= 20,
-    decay_rate=0.9,
+    decay_steps= 5,
+    decay_rate=0.8,
     staircase=True
     )
     
@@ -93,8 +89,8 @@ def reward_vector(learner_l, expert_l, kernel):
 ############# MAIN TRAINING LOOP
 verbose = True
 store_values = []
-
 batch_expert_locs = expert_seq
+trainable_variables_shapes = model.trainable_variables_shapes
 
 t0 = time.time()
 for epoch in range(num_epochs):
@@ -114,7 +110,7 @@ for epoch in range(num_epochs):
             batch_expert_locs = expert_seq[shuffled_ids]
 
         # generate learner samples
-        learner_data = model.generate(space = space, batch_size = batch_learner_size, calc_grad = True, verbose = False)
+        learner_data = model.generate(batch_size = batch_learner_size, calc_grad = True, verbose = False)
         batch_learner_locs = learner_data.locs
         
         # compute rewards
@@ -125,18 +121,17 @@ for epoch in range(num_epochs):
         
         #compute gradient
         grad_per_batch = learner_data.grad
-        grads =[ tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  tf.stack(c) / batch_learner_size , axis = 0)  for c in grad_per_batch.T]
+        grads = tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  grad_per_batch / batch_learner_size , axis = 0)
+        #grads =[ tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  tf.stack(c) / batch_learner_size , axis = 0)  for c in grad_per_batch.T]
         
         # mulitply by -1 [to maximize] and normalize [to avoid explosion]
-        grads = [-1 * g for g in grads]
+        print(grads)
+        grads = -1 * grads
+        grads = tf.split(grads, trainable_variables_shapes )
         grads = tf.clip_by_global_norm(grads, 1, use_norm=None, name=None)[0]
         
         #grads[1] = tf.constant([0.0], dtype=float_type)
         #grads[0] = tf.constant([0.0,0.0], dtype=float_type)
-  
-        #compute log likelihood
-        #loglik =  tf.math.reduce_sum(tf.stack(learner_data._loglik) / batch_learner_size, axis = 0)
-        #loglik = loglik.numpy()
 
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
         #store_values.append(model.trainable_variables[0].numpy()[0])
