@@ -10,40 +10,43 @@ tfk = tfp.math.psd_kernels
 
 float_type = tf.dtypes.float64
 
-from point.point_process import Space
+from point.misc import Space
+from point.point_process import PointsData
 from point.helper import get_process, method
 
-#LOAD SYNTH DATA
-directory = "D:\GitHub\point\data"
+################LOAD SYNTH DATA
+directory = "D:\GitHub\point\data\data_rff"
 expert_seq = np.load(directory + "\data_synth_points.npy")
 expert_variables = np.load(directory + "\data_synth_variables.npy", allow_pickle=True)
 expert_space = np.load(directory + "\data_synth_space.npy", allow_pickle=True)
-print("[{}] SYNTH-DATA variables : {}".format(arrow.now(), expert_variables), file=sys.stderr)
+expert_sizes = np.load(directory + "\data_synth_sizes.npy", allow_pickle=True)
 
-rng = np.random.RandomState(5)
+#data = PointsData( expert_sizes, expert_seq, expert_space)
+#data.plot_points(batch_index = 0)
 
-####### HYPER PARAMETERS
-num_epochs = 1
-num_iter = 1000
+rng = np.random.RandomState()
 
-batch_learner_size = 50
-batch_expert_size = None
-n_components = 250 
 
-####### INIT
+####### INIT PARAMETERS
 num_experts = expert_seq.shape[0]
 
 #tf.random.set_seed(10)
 #variance = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 10, dtype=float_type), name='sig')
 #length_scale = tf.Variable(tf.random.uniform(shape = [2], minval=0, maxval = 1, dtype=float_type), dtype=float_type, name='lengthscale')
 
-variance = tf.Variable([2.0], dtype=float_type, name='sig')
+variance = tf.Variable([8.0], dtype=float_type, name='sig')
 length_scale = tf.Variable([0.2], dtype=float_type, name='lengthscale')
+
+variance_poly = tf.Variable([4.0], dtype=float_type, name='sig')
+offset_poly = tf.Variable([1.0], dtype=float_type, name='sig')
 
 ######## INSTANTIATE MODEL
 space = Space(expert_space)
-method = method.NYST
-model = get_process(method, space = space, n_components = 250, random_state = rng, variance = variance, length_scale = length_scale)
+method = method.RFF
+model = get_process(method, space = space, n_components = 250, random_state = rng, 
+                    variance_poly = variance_poly,
+                    offset_poly  = offset_poly,
+                    variance = variance, length_scale = length_scale)
 
 ######## LEARNING HYPER
 reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=float_type),name='ExponentiatedQuadratic')
@@ -52,12 +55,27 @@ initial_learning_rate = 0.8
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate,
     decay_steps= 20,
-    decay_rate=0.8,
+    decay_rate=0.9,
     staircase=True
     )
     
 optimizer = tf.keras.optimizers.SGD(learning_rate= lr_schedule )
 
+
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+####### HYPER PARAMETERS
+num_epochs = 1
+num_iter = 10
+
+batch_learner_size = 100
+batch_expert_size = None
+n_components = 250
+########################
+
+print("[{}] SYNTH-DATA variables : {}".format(arrow.now(), expert_variables), file=sys.stderr)
 print("")
 print("[{}] INIT with length_scale:={}, variance:={}".format(arrow.now(), length_scale, variance))
 
@@ -114,6 +132,7 @@ for epoch in range(num_epochs):
         batch_learner_locs = learner_data.locs
         
         # compute rewards
+        
         rewards_per_points = reward_vector(learner_data.locs, batch_expert_locs, reward_kernel)
         rewards_per_batch =[ tf.math.reduce_sum(s) for s in tf.split(rewards_per_points, learner_data.sizes )]
         rewards_per_batch = tf.stack(rewards_per_batch)
@@ -122,13 +141,13 @@ for epoch in range(num_epochs):
         #compute gradient
         grad_per_batch = learner_data.grad
         grads = tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  grad_per_batch / batch_learner_size , axis = 0)
-        #grads =[ tf.math.reduce_sum(tf.linalg.diag(rewards_per_batch) @  tf.stack(c) / batch_learner_size , axis = 0)  for c in grad_per_batch.T]
-        
+ 
         # mulitply by -1 [to maximize] and normalize [to avoid explosion]
-        print(grads)
         grads = -1 * grads
+        
+        #grads = tf.clip_by_value(grads, clip_value_min = -200, clip_value_max = 200)
         grads = tf.split(grads, trainable_variables_shapes )
-        grads = tf.clip_by_global_norm(grads, 1, use_norm=None, name=None)[0]
+        grads = tf.clip_by_global_norm(grads, clip_norm = 1, use_norm=None, name=None)[0]
         
         #grads[1] = tf.constant([0.0], dtype=float_type)
         #grads[0] = tf.constant([0.0,0.0], dtype=float_type)
@@ -137,13 +156,12 @@ for epoch in range(num_epochs):
         #store_values.append(model.trainable_variables[0].numpy()[0])
 
         #printout
-        print("[{}] grad0 : {}".format(arrow.now(), grads[0]))
-        print("[{}] grad1 : {}".format(arrow.now(), grads[1]))
+        print("[{}] grads : {}".format(arrow.now(), grads))
         print("[{}] learning_rate : {}".format(arrow.now(), optimizer._decayed_lr(tf.float32)))
         print("[{}] new variables : {}".format(arrow.now(), model.parameters))
         #print("[{}] loss : {}".format(arrow.now(), loglik))
 
-print(time.time() - t0)
+print("time:" + str(time.time() - t0))
 #estimated_variance = np.mean(store_values[-10:])
 
 

@@ -27,7 +27,6 @@ class PointsData():
         self.sizes = sizes
 
         self.grad = grad
-        
         self.variables = trainable_variables
         
     def plot_points(self, batch_index = 0):
