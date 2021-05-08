@@ -34,17 +34,16 @@ class Test_Kernel(unittest.TestCase):
         period = (1000, 2) #number of periods lenght parameter per dimension (must be set)
         
         self.X =tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
-        
-        
-        kernel1 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-        kernel2 =  gfk.Matern12(variance= variance, lengthscales= length_scale)
-        
-        variance2 = tf.Variable(0.5, dtype=float_type, name='sig')
-        poly =  gfk.Polynomial(degree=2.0, variance= variance2, offset= 0.1)
-        linear = gfk.Linear(variance = variance2)
 
-        comp1 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  poly
-        comp2 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  linear
+        kernel1 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
+        #kernel2 =  gfk.Matern12(variance= variance, lengthscales= length_scale)
+        
+        #variance2 = tf.Variable(0.5, dtype=float_type, name='sig')
+        #poly =  gfk.Polynomial(degree=2.0, variance= variance2, offset= 0.1)
+        #linear = gfk.Linear(variance = variance2)
+
+        #comp1 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  poly
+        #comp2 = gfk.SquaredExponential(variance= variance, lengthscales= length_scale) +  linear
         comp3 = kernel1 + gfk.Periodic(kernel1, period = period)
         
         self.kernel = comp3
