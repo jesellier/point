@@ -31,6 +31,8 @@ class LowRankRFF(LowRankBase):
 
         self._length_scale = Parameter(length_scale , transform=positive())
         self._variance =  Parameter(variance, transform=positive())
+        
+        self.use_offset = True
 
 
     @property
@@ -45,23 +47,15 @@ class LowRankRFF(LowRankBase):
             l.append(self._length_scale.trainable_variables[0])
         if self._variance.trainable :
             l.append(self._variance.trainable_variables[0])
-            
-        #return (self._length_scale , self._variance)
-        return tuple(l)
-    
-    #@property
-    #def trainable_variables_shape(self):
-        #l = []
-        
-        
 
+        return tuple(l)
 
 
     def sample(self):
         random_state = check_random_state_instance(self._random_state)
         size = (self.n_features, self.n_components)
 
-        self._z = tf.constant(random_state.normal(size = size), dtype=float_type, name='z')
+        self._G = tf.constant(random_state.normal(size = size), dtype=float_type, name='z')
         self._random_offset = tf.constant(random_state.uniform(0, 2 * np.pi, size=self.n_components), dtype=float_type, name='b')
         self._beta = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=float_type, name='beta')
 
@@ -73,11 +67,11 @@ class LowRankRFF(LowRankBase):
         gamma = 1 / (2 * self._length_scale **2 )
 
         if len(gamma.shape) == 0 or gamma.shape[0] == 1 :
-            self._random_weights =  tf.math.sqrt(2 * gamma) * self._z
+            self._random_weights =  tf.math.sqrt(2 * gamma) * self._G
             self._is_fitted = True
             return self
 
-        self._random_weights =  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ self._z
+        self._random_weights =  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ self._G
         self._is_fitted = True
         return self
     
@@ -98,11 +92,11 @@ class LowRankRFF(LowRankBase):
         if n_features != self.n_features :
             raise ValueError("dimension of X must be =:" + str(self.n_features ))
 
-        output = X @ self._random_weights  + self._random_offset
-        output = tf.cos(output)
-        output = tf.sqrt(2 * self._variance /tf.constant(self.n_components, dtype=float_type)) * output
+        features = X @ self._random_weights  + self._random_offset
+        features = tf.cos(features)
+        features *= tf.sqrt(2 * self._variance /tf.constant(self.n_components, dtype=float_type)) 
      
-        return output
+        return features
     
 
     def kernel(self, X):

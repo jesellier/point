@@ -15,7 +15,7 @@ from point.point_process import PointsData
 from point.helper import get_process, method
 
 ################LOAD SYNTH DATA
-directory = "D:\GitHub\point\data\data_rff"
+directory = "D:\GitHub\point\data\data_nyst"
 expert_seq = np.load(directory + "\data_synth_points.npy")
 expert_variables = np.load(directory + "\data_synth_variables.npy", allow_pickle=True)
 expert_space = np.load(directory + "\data_synth_space.npy", allow_pickle=True)
@@ -37,12 +37,12 @@ num_experts = expert_seq.shape[0]
 variance = tf.Variable([8.0], dtype=float_type, name='sig')
 length_scale = tf.Variable([0.2], dtype=float_type, name='lengthscale')
 
-variance_poly = tf.Variable([4.0], dtype=float_type, name='sig')
-offset_poly = tf.Variable([1.0], dtype=float_type, name='sig')
+variance_poly = tf.Variable([4.0], dtype=float_type, name='sig_p')
+offset_poly = tf.Variable([1.0], dtype=float_type, name='off_p')
 
 ######## INSTANTIATE MODEL
 space = Space(expert_space)
-method = method.RFF
+method = method.NYST
 model = get_process(method, space = space, n_components = 250, random_state = rng, 
                     variance_poly = variance_poly,
                     offset_poly  = offset_poly,
@@ -60,6 +60,7 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     )
     
 optimizer = tf.keras.optimizers.SGD(learning_rate= lr_schedule )
+#optimizer = tf.keras.optimizers.Adam(learning_rate= lr_schedule, beta_1=0.6, beta_2=0.4, epsilon=1e-07 )
 
 
 
@@ -67,11 +68,14 @@ optimizer = tf.keras.optimizers.SGD(learning_rate= lr_schedule )
 
 
 ####### HYPER PARAMETERS
-num_epochs = 1
-num_iter = 10
 
-batch_learner_size = 100
-batch_expert_size = None
+
+num_epochs = 1
+
+num_iter = 10000
+
+batch_learner_size = 50
+batch_expert_size = 50
 n_components = 250
 ########################
 

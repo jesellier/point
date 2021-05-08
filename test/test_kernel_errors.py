@@ -35,7 +35,7 @@ class Check_Errors():
         self.length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
     
         self.kernel = gfk.SquaredExponential(variance= self.variance, lengthscales= self.length_scale)
-        self.X = tf.constant(rng.normal(size = [500, 2]), dtype=float_type, name='X')
+        self.X = tf.constant(rng.normal(size = [250, 2]), dtype=float_type, name='X')
         self.mat = self.kernel(self.X)
         
 
@@ -103,6 +103,7 @@ class Check_Errors():
 
         plt.xlabel("n.components")
         plt.ylabel("norm.average.error")
+        plt.legend()
         plt.show()
 
         print("TOTAL_ERROR_RFF := %f - in [%f] " % (sum(e1_[:,0]), sum(e1_[:,1])))
