@@ -40,7 +40,6 @@ def reward_vector(learner_l, expert_l, kernel):
     return (reward, sum_el, sum_ll)
 
             
-    
 
 
 class Test_Reward(unittest.TestCase):
@@ -88,12 +87,12 @@ class Test_Reward(unittest.TestCase):
         
         
     def test_sum(self):
+        
         learner_l = self.learner_l
         expert_l  = self.expert_l 
         kernel = self.kernel
 
         reward, sel, sll = reward_vector(learner_l, expert_l, kernel)
-
         points = Test_Reward.convert_to_list(self.learner_l)
         
         

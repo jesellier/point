@@ -13,8 +13,8 @@ float_type = tf.dtypes.float64
 rng = np.random.RandomState(40)
 
 import time
-from point.low_rank_rff import LowRankRFF
-from point.low_rank_nystrom import LowRankNystrom
+from point.low_rank.low_rank_rff import LowRankRFF
+from point.low_rank.low_rank_nystrom import LowRankNystrom
 
 import matplotlib.pyplot as plt
 
@@ -45,7 +45,7 @@ class Check_Errors():
          start = time.time()
          for _ in range(n_batch):
                 lrgp.fit(sample = True)
-                K = lrgp.kernel(self.X).numpy()
+                K = lrgp(self.X).numpy()
                 error +=  np.linalg.norm(self.mat.numpy() - K, ord = 'fro')
         
          time_ = time.time() - start
@@ -58,7 +58,7 @@ class Check_Errors():
         if n_components is None : n_components = self.n_components
         if n_batch is None : n_batch = self.n_batch
 
-        lrgp = LowRankRFF(self.length_scale, self.variance, n_components = n_components, random_state = rng)
+        lrgp = LowRankRFF(self.kernel, n_components = n_components, random_state = rng)
         (error, time_)= self.averageNormError(lrgp, n_batch)
         average_error = error / np.linalg.norm(self.mat.numpy(), ord = 'fro')
         
@@ -115,7 +115,7 @@ class Check_Errors():
 
 if __name__ == '__main__':
     instance = Check_Errors()
-    #instance.error_RFF(n_batch = 10)
+    instance.error_RFF(n_batch = 10)
     #instance.error_NYST(n_batch = 10)
     
     (e1, e2) = instance.error_analysis()

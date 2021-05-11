@@ -15,8 +15,8 @@ rng = np.random.RandomState(40)
 
 import unittest
 
+from point.helper import get_lrgp, method
 from point.point_process import CoxLowRankSpatialModel
-from point.low_rank_rff import LowRankRFF
 from point.utils import transformMat
 from point.misc import Space
 
@@ -63,9 +63,11 @@ class Test_Gradient(unittest.TestCase):
         
         self.variance = tf.Variable(2.0, dtype=float_type, name='sig')
         self.length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-        
         space = Space([0,1])
-        lrgp = LowRankRFF(self.length_scale, self.variance, space = space, n_components = 1000, random_state = rng).fit() 
+        
+        lrgp = get_lrgp(method = method.RFF, variance = self.variance, length_scale = self.length_scale, space = space,
+                        n_components = 250, random_state = rng)
+        
         self.p = CoxLowRankSpatialModel(lrgp, random_state = rng)
         self.X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
 
@@ -77,36 +79,33 @@ class Test_Gradient(unittest.TestCase):
         variance = self.variance
         X = self.X
 
-        out, grad = p.likelihood_grad(X)
+        out, grad = p.log_likelihood_objective(X)
         grad_variance = grad[1].numpy()
         true_value = (out/variance).numpy()
         
         grad_adj = (tf.exp(variance) / (tf.exp(variance) - 1)).numpy()
-        #grad_adj = 1.0
-
         self.assertAlmostEqual(true_value , grad_variance * grad_adj, places=7)
         
         
     def test_grad_process(self):
+        
         p = self.p
 
         with tf.GradientTape() as tape:
-            #p.lrgp_.fit((length_scale , variance))
             p.lrgp.fit(sample = False)
             out = p.lrgp.integral()
         
         grad = tape.gradient(out, p.trainable_variables) 
         grad = grad[0]
+        print(grad)
 
         R = p.lrgp.n_components
-        b = p.lrgp.random_offset_
-        z = p.lrgp.z_
-        beta = p.lrgp.beta_
+        b = p.lrgp._random_offset
+        z = p.lrgp._G
+        beta = p.lrgp._latent
         
         variance = Parameter(self.variance, transform=positive())
         length_scale = Parameter(self.length_scale, transform=positive())
-        #variance = self.variance
-        #length_scale = self.length_scale
 
         with tf.GradientTape() as tape:  
             gamma = 1 / (2 * length_scale **2 )       
@@ -115,7 +114,8 @@ class Test_Gradient(unittest.TestCase):
             mat = integral_mat_recalc(w, b, R, lplus = 1.0, lminus = 0)
             out2 = variance * tf.transpose(beta) @ mat @ beta
         grad2 = tape.gradient(out2, length_scale.trainable_variables[0]) 
-        #grad2 = tape.gradient(out2, length_scale) 
+        
+        print(grad2)
 
         self.assertAlmostEqual(out.numpy(), out2.numpy(), places=7)
         for g in zip(grad.numpy(), grad2.numpy()):

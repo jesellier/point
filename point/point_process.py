@@ -8,13 +8,14 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfk = tfp.math.psd_kernels
 
-float_type = tf.dtypes.float64
+from gpflow.config import default_float
+import gpflow.kernels as gfk 
 
 from scipy.optimize import minimize #For optimizing
 
 from point.utils import check_random_state_instance
-from point.low_rank_rff import LowRankRFF
-from point.misc import Space
+from point.low_rank.low_rank_rff import LowRankRFF
+from point.misc import Space, TensorMisc
 
 
 
@@ -29,6 +30,18 @@ class PointsData():
         self.grad = grad
         self.variables = trainable_variables
         
+    @property
+    def num_sequences(self):
+        return self.locs.shape[0]
+        
+    def batch_shuffle(self, n_batch, random_state = None):
+        random_state = check_random_state_instance(random_state)
+        
+        shuffled_ids = np.arange(self.num_sequences)
+        random_state.shuffle(shuffled_ids)
+        shuffled_ids = shuffled_ids[- n_batch :]
+        return shuffled_ids
+        
     def plot_points(self, batch_index = 0):
         plt.figure()
         size = self.sizes[batch_index]
@@ -41,18 +54,8 @@ class PointsData():
         size = self.sizes[batch_index]
         return self.locs[batch_index][0:size,:]
             
-        
-class TransformerLogExp():
-    def __init__(self):
-        pass
-    
-    def __call__(self, theta):
-        return tf.math.log(tf.math.exp(theta) - 1)
-    
-    def inverse(self, theta):
-        return tf.math.log(tf.math.exp(theta) + 1)
-     
-        
+
+
 
 class HomogeneousSpatialModel() :
 
@@ -90,24 +93,19 @@ class CoxLowRankSpatialModel() :
     @property
     def trainable_variables(self):
         return self.lrgp.trainable_variables
-    
-    @property
-    def trainable_variables_shapes(self):
-        out = [p.shape[0] for p in self.trainable_variables]
-        return out
 
 
     def sample(self):
         self.lrgp.sample()
     
 
-    def likelihood_grad(self, points):
+    def log_likelihood_objective(self, points):
         if not self.lrgp._is_fitted :
             raise ValueError("lowRankGP instance not fitted")
 
         with tf.GradientTape() as tape:  
             self.lrgp.fit(sample = False)
-            out = self.lrgp.likelihood(points, self.space.bounds1D)
+            out = self.lrgp.maximum_log_likelihood_objective(points)
 
         grad = tape.gradient(out, self.trainable_variables) 
         
@@ -123,16 +121,15 @@ class CoxLowRankSpatialModel() :
         max_fun = 0
         res_max = None
         
-        def __func(x):
-             out = self.lrgp.func(tf.constant([[x[0], x[1]]], dtype=float_type))
+        def objective_function(x):
+             out = self.lrgp.lambda_func(tf.convert_to_tensor([[x[0], x[1]]], dtype=default_float()))
              out = out[0][0]
              return out.numpy()
         
         # Warm up with random points
         if n_warm_up is not None and n_warm_up > 0 :
             x_tries = random_state.uniform(bounds[:, 0], bounds[:, 1], size=(n_warm_up, bounds.shape[0]))
-
-            fs = self.lrgp.func(tf.constant(x_tries, dtype=float_type))**2
+            fs = self.lrgp.lambda_func(tf.convert_to_tensor(x_tries, dtype=default_float())) 
             fs = fs.numpy()
             max_fun = fs.max()
         
@@ -144,7 +141,7 @@ class CoxLowRankSpatialModel() :
         
             for x_try in x_seeds:
                 # Find the minimum of minus the acquisition function
-                res = minimize(lambda x: - (__func(x)**2), x_try, bounds=bounds)
+                res = minimize(lambda x: - objective_function(x), x_try, bounds=bounds)
         
                 # See if success
                 if not res.success:
@@ -163,9 +160,9 @@ class CoxLowRankSpatialModel() :
 
         random_state = check_random_state_instance(self._random_state)
 
-        points_list = []
+        points_lst = []
+        grad_lst = []
         sizes = []
-        grad_list = []
     
         max_len = 0
         n_gen = 0
@@ -181,28 +178,26 @@ class CoxLowRankSpatialModel() :
  
             full_points  = HomogeneousSpatialModel(lambdaMax, self.space, random_state= random_state).generate()
       
-            lambdas =  self.lrgp.func(tf.constant(full_points, dtype=float_type))**2
+            lambdas =  self.lrgp.func(tf.constant(full_points, dtype=default_float()))**2
             lambdas = lambdas.numpy()
             
             n_lambdas = lambdas.shape[0]
             if do_clipping is True : lambdas = np.clip(lambdas, 0, lambdaMax)
-            
-            
+
             u = random_state.uniform(0, 1, n_lambdas)
             tmp = (u < lambdas.reshape(n_lambdas)/lambdaMax)
             retained_points = full_points[tmp]
-            #thinned = X[~tmp]
-            
+    
             n_points = retained_points.shape[0]
             max_len = max(max_len , n_points)  
 
-            points_list.append(retained_points)
+            points_lst.append(retained_points)
             sizes.append(n_points)
             
             if calc_grad :
-               _, grad = self.likelihood_grad(retained_points)
-               grad = tf.concat([g for g in grad], axis =0)
-               grad_list.append(grad)
+               loss, grad = self.log_likelihood_objective(retained_points)
+               grad = TensorMisc().pack_tensors(grad)
+               grad_lst.append(grad)
 
             if verbose :
                 print("[%s] %d-th sequence generated: %d raw samples. %d samples have been retained. " % \
@@ -213,11 +208,11 @@ class CoxLowRankSpatialModel() :
         # padding for the output
         points = np.zeros((batch_size, max_len, 2))
         for b in range(batch_size):
-            points[b, :points_list[b].shape[0]] = points_list[b]
+            points[b, :points_lst[b].shape[0]] = points_lst[b]
         
         return PointsData(sizes, points, self.space.bounds1D,
                           np.array(self.parameters, dtype=object), 
-                          tf.stack(grad_list)
+                          tf.stack(grad_lst)
                           )
     
     
@@ -225,29 +220,21 @@ class CoxLowRankSpatialModel() :
     
 if __name__ == "__main__":
     
-    rng = np.random.RandomState(10)
+    rng = np.random.RandomState()
     sp = Space([-1,1])
     
-    variance = tf.Variable([8], dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.2], dtype=float_type, name='l')
-    
-    variance_poly = tf.Variable([4], dtype=float_type, name='sig')
-    offset_poly = tf.Variable([0.02], dtype=float_type, name='sig')
+    variance = tf.Variable([8], dtype=default_float(), name='sig')
+    length_scale = tf.Variable([0.5], dtype=default_float(), name='l')
+    kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
+    beta0 = tf.Variable([0.5], dtype=default_float(), name='beta0')
 
-    lrgp = LowRankRFF(length_scale, variance, space = sp, n_components =  250, random_state = rng)
+    lrgp = LowRankRFF(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng)
     lrgp.fit()
-    
+
+    X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
     process = CoxLowRankSpatialModel(lrgp, random_state = rng)
-
-
     data = process.generate(verbose = False, n_warm_up = 10000, batch_size =1, calc_grad = True)
-    #grads = tf.stack(data.grad) 
-    
-    #size = [p.shape[0] for p in process.lrgp.trainable_variables]
-    #grad = tf.transpose(data.grad)
-    
-    #test = tf.split(tf.transpose(data.grad), size)
-    
+
     process.lrgp.plot_kernel()
     process.lrgp.plot_surface()
     data.plot_points()
