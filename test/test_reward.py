@@ -15,11 +15,7 @@ rng = np.random.RandomState(40)
 
 import unittest
 
-def concenat_vector(vec):
-    cont_vec =  tf.unstack(vec, axis = 0)  
-    cont_vec =  tf.concat(cont_vec, axis=0)  
-    cont_vec = tf.boolean_mask(cont_vec, (cont_vec[:,0] != 0))
-    return cont_vec
+from point.reward import Reward
 
 
 def reward_vector(learner_l, expert_l, kernel):
@@ -27,8 +23,8 @@ def reward_vector(learner_l, expert_l, kernel):
     n_learner_batches = len(learner_l)
     n_expert_batches = len(expert_l)
 
-    learner_l = concenat_vector(learner_l)
-    expert_l = concenat_vector(expert_l) 
+    learner_l = Reward()._Reward__concenat_vector(learner_l)
+    expert_l =  Reward()._Reward__concenat_vector(expert_l) 
     
     mat_el = kernel.matrix(expert_l, learner_l)
     mat_ll = kernel.matrix(learner_l, learner_l)
@@ -68,33 +64,35 @@ class Test_Reward(unittest.TestCase):
 
         self.learner_l = [rng.normal(size = [size, 2]) for _ in range(n_batch)]
         self.expert_l =  [rng.normal(size = [size, 2]) for _ in range(n_batch)]
-        
         self.kernel = tfk.ExponentiatedQuadratic(
             amplitude=None, 
             length_scale= tf.constant(0.5,  dtype=float_type),
             name='ExponentiatedQuadratic')
-        
-        
+
+
     def test_concat(self):
         
-        learner = concenat_vector(self.learner_l)
+        learner = Reward()._Reward__concenat_vector(self.learner_l)
         bench_learner = Test_Reward.convert_to_list(self.learner_l)
         
         for i in range(len(learner)):
             self.assertAlmostEqual(learner[i][0], bench_learner[i][0], places=7)
             self.assertAlmostEqual(learner[i][1], bench_learner[i][1], places=7)
-                    
-        
-        
+
+
     def test_sum(self):
         
         learner_l = self.learner_l
         expert_l  = self.expert_l 
         kernel = self.kernel
 
-        reward, sel, sll = reward_vector(learner_l, expert_l, kernel)
+        reward_recalc, sel, sll = reward_vector(learner_l, expert_l, kernel)
         points = Test_Reward.convert_to_list(self.learner_l)
         
+        reward_prod = Reward().rewards_per_points(learner_l, expert_l, kernel)
+        
+        for i in range(len(reward_prod)):
+            self.assertAlmostEqual(reward_prod[i] , reward_recalc[i] , places=7)
         
         for i in range(len(points)):
             recalc = Test_Reward.compute_sum(learner_l, points[i], kernel)

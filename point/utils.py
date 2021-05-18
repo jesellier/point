@@ -26,12 +26,4 @@ def check_random_state_instance(seed):
     raise ValueError('%r cannot be used to seed a numpy.random.RandomState'
                      ' instance' % seed)
 
-
-
-def transformMat(vec, n):
-    #for a vector vec return two matrices M1 = {v_i + v_j}_{i,j}  M1 = {v_i - v_j}_{i,j}
-    M = tf.reshape(tf.tile(vec, tf.constant([n])), [n, tf.shape(vec)[0]])
-    return (tf.transpose(M) + M, tf.transpose(M)-M)
-
-
     

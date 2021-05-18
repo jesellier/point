@@ -26,7 +26,7 @@ class PointsData():
         
         self.locs = point_locations
         self.sizes = sizes
-
+      
         self.grad = grad
         self.variables = trainable_variables
         
@@ -34,13 +34,12 @@ class PointsData():
     def num_sequences(self):
         return self.locs.shape[0]
         
-    def batch_shuffle(self, n_batch, random_state = None):
+    def shuffled_index(self, n_batch, random_state = None):
         random_state = check_random_state_instance(random_state)
-        
-        shuffled_ids = np.arange(self.num_sequences)
-        random_state.shuffle(shuffled_ids)
-        shuffled_ids = shuffled_ids[- n_batch :]
-        return shuffled_ids
+        shuffled_idx = np.arange(self.num_sequences)
+        random_state.shuffle(shuffled_idx)
+        shuffled_idx = shuffled_idx[- n_batch :]
+        return shuffled_idx
         
     def plot_points(self, batch_index = 0):
         plt.figure()
@@ -50,12 +49,9 @@ class PointsData():
         plt.xlabel("x1"); plt.ylabel("x2")
         plt.show()
         
-    def points(self, batch_index =0 ):
-        size = self.sizes[batch_index]
-        return self.locs[batch_index][0:size,:]
+    def __getitem__(self, item):
+        return self.locs[item][0:self.sizes[item],:]
             
-
-
 
 class HomogeneousSpatialModel() :
 
@@ -97,19 +93,19 @@ class CoxLowRankSpatialModel() :
 
     def sample(self):
         self.lrgp.sample()
-    
 
-    def log_likelihood_objective(self, points):
+
+    def compute_loss_and_gradients(self, points):
         if not self.lrgp._is_fitted :
             raise ValueError("lowRankGP instance not fitted")
 
         with tf.GradientTape() as tape:  
             self.lrgp.fit(sample = False)
-            out = self.lrgp.maximum_log_likelihood_objective(points)
+            loss = self.lrgp.maximum_log_likelihood_objective(points)
 
-        grad = tape.gradient(out, self.trainable_variables) 
-        
-        return (out, grad)
+        grad = tape.gradient(loss, self.trainable_variables) 
+    
+        return (loss, grad)
         
 
 
@@ -194,8 +190,8 @@ class CoxLowRankSpatialModel() :
             points_lst.append(retained_points)
             sizes.append(n_points)
             
-            if calc_grad :
-               loss, grad = self.log_likelihood_objective(retained_points)
+            if calc_grad  :
+               loss, grad = self.compute_loss_and_gradients(retained_points)
                grad = TensorMisc().pack_tensors(grad)
                grad_lst.append(grad)
 
@@ -210,14 +206,16 @@ class CoxLowRankSpatialModel() :
         for b in range(batch_size):
             points[b, :points_lst[b].shape[0]] = points_lst[b]
         
-        return PointsData(sizes, points, self.space.bounds1D,
-                          np.array(self.parameters, dtype=object), 
-                          tf.stack(grad_lst)
-                          )
-    
-    
+        return PointsData(
+            sizes = sizes, 
+            point_locations = points, 
+            space = self.space.bounds1D,  
+            trainable_variables = np.array(self.parameters, dtype=object), 
+            grad = tf.stack(grad_lst)
+            )
 
     
+
 if __name__ == "__main__":
     
     rng = np.random.RandomState()
@@ -233,7 +231,7 @@ if __name__ == "__main__":
 
     X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
     process = CoxLowRankSpatialModel(lrgp, random_state = rng)
-    data = process.generate(verbose = False, n_warm_up = 10000, batch_size =1, calc_grad = True)
+    data = process.generate(verbose = False, n_warm_up = 10000, batch_size =10, calc_grad = True)
 
     process.lrgp.plot_kernel()
     process.lrgp.plot_surface()

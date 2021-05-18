@@ -69,16 +69,14 @@ n_batch = 100
 t0 = time.time()
 space = Space(expert_space)
 rng = np.random.RandomState(10)
-variables = build_model(expert_data.points(batch_index =0), space).trainable_variables
+variables = build_model(expert_data[0], space).trainable_variables
 options = dict(maxiter = 10)
-
-
-variables = build_model(expert_data.points(batch_index =0), space).trainable_variables
 results_lst = []
+
 
 for epoch in range(num_epochs):
     
-    batch_ids = expert_data.batch_shuffle(n_batch, random_state = rng)
+    batch_ids = expert_data.shuffled_index(n_batch, random_state = rng)
     batch_iteration = 0
 
     for event_id in batch_ids :
@@ -88,10 +86,9 @@ for epoch in range(num_epochs):
         print("start [%s] %d-th epoch - %d iteration : " % \
                   (arrow.now(), epoch+1, batch_iteration+1))
 
-        events = expert_data.points(batch_index = event_id )
+        events = expert_data[event_id]
         model = build_model(events, space)
         TensorMisc().assign_tensors(model.trainable_variables, variables)
-
 
         def objective_closure():
             return -model.elbo(events)

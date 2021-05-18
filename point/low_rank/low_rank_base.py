@@ -33,18 +33,13 @@ class LowRankBase(gpflow.models.GPModel, metaclass=abc.ABCMeta):
         
         if beta0 is None :
             self.beta0 = Parameter([1e-10], transform=positive(), name = "beta0")
-            self.set_beta_trainable(False)
+            gpflow.set_trainable(self.beta0, False)
         else :
             self.beta0 = Parameter(beta0, transform=positive(), name = "beta0")
         
         self._is_fitted = False
         self._random_state = random_state
         
-    def set_beta_trainable(self, flag : bool):
-        self.beta0.variables[0]._trainable = flag
-        
-    def set_variance_trainable(self, flag : bool):
-        self.kernel.variance.variables[0]._trainable = flag
 
     def lambda_func(self, X):
         return (self.func(X) + self.beta0)**2

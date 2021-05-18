@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfk = tfp.math.psd_kernels
 
+import gpflow
 from gpflow.config import default_float
 
 from point.misc import Space, TensorMisc
@@ -41,7 +42,7 @@ beta0 = tf.Variable([0.5], dtype=default_float(), name='beta0')
 method = method.RFF
 model = get_process(method, space = space, beta0 = beta0, n_components = 250, random_state = rng, 
                     variance = variance, length_scale = length_scale)
-model.lrgp.set_beta_trainable(False)
+gpflow.set_trainable(model.lrgp.beta0, False)
 
 ######## LEARNING HYPER
 reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=default_float()),name='ExponentiatedQuadratic')
@@ -71,6 +72,7 @@ print("")
 print("[{}] INIT with beta0:={}, length_scale:={}, variance:={}".format(arrow.now(), beta0, length_scale, variance))
 
 
+
 ############# MAIN TRAINING LOOP
 verbose = True
 store_values = []
@@ -96,9 +98,7 @@ for epoch in range(num_epochs):
         learner_data = model.generate(batch_size = batch_learner_size, calc_grad = True, verbose = False)
         
         # compute rewards
-        rewards_per_points = Reward().rewards(learner_data.locs, batch_expert_locs, reward_kernel)
-        rewards_per_batch =[ tf.math.reduce_sum(s) for s in tf.split(rewards_per_points, learner_data.sizes )]
-        rewards_per_batch = tf.stack(rewards_per_batch)
+        rewards_per_batch =  Reward().rewards_per_batch(learner_data, batch_expert_locs, reward_kernel)
         loss = sum(rewards_per_batch) / batch_learner_size # := minus reward term
         
         #compute gradient

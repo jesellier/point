@@ -6,6 +6,7 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfk = tfp.math.psd_kernels
 
+import gpflow
 from gpflow.config import default_float
 
 from point.misc import Space, TensorMisc
@@ -14,8 +15,8 @@ from point.point_process import PointsData
 from point.helper import get_process, method
 from point.optim.optim_scipy import OptimScipy, initial_parameters
 
-
 rng = np.random.RandomState()
+
 
 ################LOAD SYNTH DATA
 directory = "D:\GitHub\point\data\data_rff"
@@ -42,7 +43,7 @@ beta0 = tf.Variable([0.5], dtype=default_float(), name='beta0')
 method = method.RFF
 model = get_process(method, space = space, beta0 = beta0, n_components = 250, random_state = rng, 
                     variance = variance, length_scale = length_scale)
-model.lrgp.set_beta_trainable(False)
+gpflow.set_trainable(model.lrgp.beta0, False)
 
 ######## LEARNING HYPER
 reward_kernel = tfk.ExponentiatedQuadratic(amplitude=None, length_scale= tf.constant(0.5,  dtype=default_float()),name='ExponentiatedQuadratic')

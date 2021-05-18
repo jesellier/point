@@ -13,7 +13,6 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 
 import unittest
-import copy
 
 from gpflow.base import Parameter
 from gpflow.utilities import positive

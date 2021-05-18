@@ -13,7 +13,6 @@ tfk = tfp.math.psd_kernels
 float_type = tf.dtypes.float64
 rng = np.random.RandomState(40)
 
-
 from point.point_process import Space, CoxLowRankSpatialModel
 from point.low_ranks.low_rank_rff import LowRankRFF
 from point.low_ranks.low_rank_nystrom import LowRankNystrom

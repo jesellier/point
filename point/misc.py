@@ -63,6 +63,14 @@ class TensorMisc():
         flats = [tf.reshape(tensor, (-1,)) for tensor in tensors]
         tensors_vector = tf.concat(flats, axis=0)
         return tensors_vector
+    
+    
+    @staticmethod
+    def pack_tensors_to_zeros(tensors: Sequence[Union[tf.Tensor, tf.Variable]]) -> tf.Tensor:
+        flats = [tf.zeros(shape = tf.reshape(tensor, (-1,)).shape, dtype = tensor.dtype) for tensor in tensors]
+        tensors_vector = tf.concat(flats, axis=0)
+        return tensors_vector
+
 
     @staticmethod
     def unpack_tensors(
@@ -78,6 +86,7 @@ class TensorMisc():
             values.append(tensor)
             s += tensor_size
         return values
+    
 
     @staticmethod
     def assign_tensors(to_tensors: Sequence[tf.Variable], values: Sequence[tf.Tensor]) -> None:
