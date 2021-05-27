@@ -69,11 +69,16 @@ class LowRankBase(gpflow.models.GPModel, metaclass=abc.ABCMeta):
          raise NotImplementedError()
 
 
-
-    def plot_surface(self):
+    def plot_surface(self, grid_size = 40):
         fig = plt.figure()
+
         ax = fig.add_subplot(111, projection='3d')
-        x = y = np.arange(-1.0, 1.0, 0.05)
+        
+        lbound = self.space.bounds1D[0]
+        hbound = self.space.bounds1D[1]
+        step = (hbound - lbound) / grid_size
+        
+        x = y = np.arange(lbound, hbound, step)
         X, Y = np.meshgrid(x, y)
     
         n = X.shape[0]**2

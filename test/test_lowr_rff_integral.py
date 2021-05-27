@@ -15,59 +15,64 @@ import unittest
 from gpflow.config import default_float
 
 from point.helper import get_lrgp, method
-from point.low_ranks.low_rank_rff import LowRankRFF
+from point.low_rank.low_rank_rff import LowRankRFF
 from point.point_process import Space
 
 rng = np.random.RandomState(40)
 
 
 
-def repmat(vec, n):
-    M =  tf.reshape(tf.tile(vec, tf.constant([n])), [n, tf.shape(vec)[0]])
-    return M
+def expandedSum(x, n =0):
+    z1 = tf.expand_dims(x, 1)
+    z2 = tf.expand_dims(x, 0)
 
-def transformMat(vec, n):
-    #for a vector vec return two matrices M1 = {v_i + v_j}_{i,j}  M1 = {v_i - v_j}_{i,j}
-    M = repmat(vec, n)
-    return (tf.transpose(M) + M, tf.transpose(M)-M)
+    return (z1 + z2, z1 - z2)
 
 
 def integral_cos_mat(w, bounds, b = tf.constant(0.0, dtype=default_float())):
     ### w = vector of weights, a = time, b = vector of b
     
     n =  w.shape[0]
-    (A, C) = transformMat(w[:, 0], n)
-    (B, D) = transformMat(w[:, 1], n)
-    C = tf.linalg.set_diag(C, tf.ones(n,  dtype=default_float())) 
-    D = tf.linalg.set_diag(D, tf.ones(n,  dtype=default_float())) 
+    Mp, Mm = expandedSum(w)
     
     up_bound = bounds[1]
     lo_bound = bounds[0]
- 
+
+    d1 = tf.stack([Mp[:,:,0] , tf.linalg.set_diag(Mm[:,:,0], tf.ones(n,  dtype=default_float())) ])
+    d2 = tf.stack([Mp[:,:,1] , tf.linalg.set_diag(Mm[:,:,1], tf.ones(n,  dtype=default_float())) ])
+
     if b.shape == [] :
-        b1 = 2 * b
-        b2 = tf.constant(0.0, dtype=default_float())
+        b3 = tf.reshape(tf.stack([2 * b, tf.constant(0.0, dtype=default_float())]), shape = (2,1,1))
     else :
-        (b1, b2) = transformMat(b, n)
+        (b1, b2) = expandedSum(b, n)
+        b3 = tf.stack([b1, b2])
 
-    mat = (1 / (A * B)) * ( tf.cos(up_bound*A + lo_bound*B + b1) + tf.cos(lo_bound*A + up_bound*B + b1)  \
-                               - tf.cos(up_bound*(A + B) + b1)  - tf.cos(lo_bound*(A + B) + b1))
-    mat += (1 / (C * D)) * (tf.cos(up_bound*C + lo_bound*D + b2) + tf.cos(lo_bound*C + up_bound*D + b2)  \
-                                - tf.cos(up_bound*(C + D) + b2)  - tf.cos(lo_bound*(C + D) + b2 ))
+    M = tf.math.reduce_sum((1 / (d1 * d2)) * ( tf.cos(up_bound*d1 + lo_bound*d2 + b3) + tf.cos(lo_bound*d1 + up_bound*d2 + b3)  - tf.cos(up_bound*(d1 + d2) + b3)  - tf.cos(lo_bound*(d1 + d2) + b3)), axis = 0)
 
-    bdo = 2 * b
-    diag = (1 / (4 * w[:,0] * w[:,1])) * ( tf.cos(2 * (up_bound*w[:,0] + lo_bound* w[:,1]) + bdo) + tf.cos(2 * (lo_bound*w[:,0] + up_bound* w[:,1]) + bdo) \
-                                              - tf.cos(2 *up_bound* (w[:,0]+ w[:,1]) + bdo) - tf.cos(2 *lo_bound*(w[:,0]+ w[:,1]) + bdo) ) \
+    diag = (1 / (4 * w[:,0] * w[:,1])) * ( tf.cos(2 * (up_bound*w[:,0] + lo_bound* w[:,1] + b)) + tf.cos(2 * (lo_bound*w[:,0] + up_bound* w[:,1] + b)) \
+                                              - tf.cos(2 *up_bound* (w[:,0]+ w[:,1]) + 2*b) - tf.cos(2 *lo_bound*(w[:,0]+ w[:,1]) + 2*b) ) \
                                               +  (up_bound - lo_bound)**2
-    mat = tf.linalg.set_diag(mat, diag) 
 
-    return  0.5 * mat
+    M = tf.linalg.set_diag(M, diag) 
+
+    return  0.5 * M
+    
+
+
+def integral_cos_mat_recalc(w, bounds, b = tf.constant(0.0, dtype=default_float())):
+    ### w = vector of weights, a = time, b = vector of b
+    tmp1 = term_plus(w=w, bounds = bounds,b=2*b)
+    tmp2 = term_minus(w=w, bounds = bounds)
+
+    return   0.5 * (tmp1 + tmp2)
+
+
 
 
 def term_plus(w, bounds, b = tf.constant(0.0, dtype=default_float())):
-    n =  w.shape[0]
-    A,_ = transformMat(w[:, 0], n)
-    B,_ = transformMat(w[:, 1], n)
+
+    A,_ = expandedSum(w[:, 0])
+    B,_ = expandedSum(w[:, 1])
     
     up_bound = bounds[1]
     lo_bound = bounds[0]
@@ -85,8 +90,8 @@ def term_plus(w, bounds, b = tf.constant(0.0, dtype=default_float())):
 
 def term_minus(w, bounds, b = tf.constant(0.0, dtype=default_float())):
     n =  w.shape[0]
-    _, C = transformMat(w[:, 0], n)
-    _, D = transformMat(w[:, 1], n)
+    _, C = expandedSum(w[:, 0])
+    _, D = expandedSum(w[:, 1])
     
     up_bound = bounds[1]
     lo_bound = bounds[0]
@@ -243,11 +248,9 @@ class TestFullIntegral(unittest.TestCase):
         bounds = [0,1]
         w = tf.constant([[0.0, 0.0],[1.0, 1.0]], dtype=default_float(), name='w')
         b = tf.constant(2.0, dtype=default_float())
-        tmp1 = term_plus(w=w, bounds = bounds,b=2*b).numpy()
-        tmp2 = term_minus(w=w, bounds = bounds).numpy()
-        
-        mat1 = 0.5 * (tmp1 + tmp2)
-        mat2 =  integral_cos_mat(w = w, bounds = bounds, b = b).numpy()
+
+        mat1 =  integral_cos_mat(w = w, bounds = bounds, b = b).numpy()
+        mat2 =  integral_cos_mat_recalc(w = w, bounds = bounds, b = b).numpy()
 
         R = self.gp.n_components
         self.gp._random_weights = tf.transpose(w)

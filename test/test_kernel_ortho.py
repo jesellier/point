@@ -56,82 +56,80 @@ def get_random_matrix(random_state, distribution, size, p_sparse=0.,
                          .format(distribution))
 
 
-if __name__ == '__main__':
+n_features = 2
+n_components = 250
+
+variance = tf.Variable(5, dtype=float_type, name='sig')
+length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
+
+kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
+X = tf.constant(rng.normal(size = [250, 2]), dtype=float_type, name='X')
+Ktrue = kernel(X).numpy()
     
-    n_features = 2
-    n_components = 250
+
+
+# %% ######################## STANDARD RFF
+random_state = rng
+size = (n_features, n_components)
+
+z = tf.constant(random_state.normal(size = size), dtype=float_type, name='z')
+random_offset = tf.constant(random_state.uniform(0, 2 * np.pi, size= n_components), dtype=float_type, name='b')
+beta = tf.constant(random_state.normal(size = (n_components, 1)), dtype=float_type, name='beta')
+
+gamma = 1 / (2 * length_scale **2 )
+random_weights =  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ z
+
+feature = X @ random_weights  + random_offset
+feature= tf.cos(feature)
+feature= tf.sqrt(2 * variance /tf.constant(n_components, dtype=float_type)) * feature
+
+K = feature @ tf.transpose(feature)
+error = np.linalg.norm(Ktrue - K, ord = 'fro') / np.linalg.norm(Ktrue, ord = 'fro') 
+print(error)
+
+
+# %% ##################### ORTHO RFF
+n_samples, n_features = X.shape
+n_stacks = int(np.ceil(n_components/n_features))
+n_components = n_stacks * n_features
     
-    variance = tf.Variable(5, dtype=float_type, name='sig')
-    length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-    
-    kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-    X = tf.constant(rng.normal(size = [250, 2]), dtype=float_type, name='X')
-    Ktrue = kernel(X).numpy()
+distribution="gaussian"
+random_fourier=True 
+use_offset= True
+
+size = (n_features, n_features)
+if isinstance(distribution, str):
+    distribution = _get_random_matrix(distribution)
+else:
+    distribution = distribution
+random_weights = []
+
+for _ in range(n_stacks):
+    W = distribution(random_state, size)
+    S = np.diag(chi.rvs(df=n_features, size=n_features,
+                        random_state=random_state))
+    SQ, _ = qr_multiply(W, S)
+    random_weights += [SQ]
+
+random_weights = np.vstack(random_weights).T
+random_offset = None
+if random_fourier:
+    random_weights = np.diag(np.sqrt(2 * gamma))  @ random_weights
+    if use_offset:
+        random_offset = random_state.uniform(0, 2*np.pi,size=n_components)
         
 
-    #########################################################################
-    random_state = rng
-    size = (n_features, n_components)
+feature = X.numpy() @ random_weights  + random_offset
+feature= np.cos(feature)
+feature= np.sqrt(2 * variance /n_components) * feature
 
-    z = tf.constant(random_state.normal(size = size), dtype=float_type, name='z')
-    random_offset = tf.constant(random_state.uniform(0, 2 * np.pi, size= n_components), dtype=float_type, name='b')
-    beta = tf.constant(random_state.normal(size = (n_components, 1)), dtype=float_type, name='beta')
+K2 = feature @ tf.transpose(feature)
+error2 = np.linalg.norm(Ktrue - K2, ord = 'fro') / np.linalg.norm(Ktrue, ord = 'fro') 
+print(error2)
 
-    gamma = 1 / (2 * length_scale **2 )
-    random_weights =  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ z
-    
-    feature = X @ random_weights  + random_offset
-    feature= tf.cos(feature)
-    feature= tf.sqrt(2 * variance /tf.constant(n_components, dtype=float_type)) * feature
 
-    K = feature @ tf.transpose(feature)
-    error = np.linalg.norm(Ktrue - K, ord = 'fro') / np.linalg.norm(Ktrue, ord = 'fro') 
-    print(error)
-    
-    
-    ######################################## TRY ORTHO
-    n_samples, n_features = X.shape
-    n_stacks = int(np.ceil(n_components/n_features))
-    n_components = n_stacks * n_features
-        
-    distribution="gaussian"
-    random_fourier=True 
-    use_offset= True
 
-    size = (n_features, n_features)
-    if isinstance(distribution, str):
-        distribution = _get_random_matrix(distribution)
-    else:
-        distribution = distribution
-    random_weights = []
-    
-    for _ in range(n_stacks):
-        W = distribution(random_state, size)
-        S = np.diag(chi.rvs(df=n_features, size=n_features,
-                            random_state=random_state))
-        SQ, _ = qr_multiply(W, S)
-        random_weights += [SQ]
 
-    random_weights = np.vstack(random_weights).T
-    random_offset = None
-    if random_fourier:
-        random_weights = np.diag(np.sqrt(2 * gamma))  @ random_weights
-        if use_offset:
-            random_offset = random_state.uniform(0, 2*np.pi,size=n_components)
-            
-    
-    feature = X.numpy() @ random_weights  + random_offset
-    feature= np.cos(feature)
-    feature= np.sqrt(2 * variance /n_components) * feature
-
-    K2 = feature @ tf.transpose(feature)
-    error2 = np.linalg.norm(Ktrue - K2, ord = 'fro') / np.linalg.norm(Ktrue, ord = 'fro') 
-    print(error2)
-
-    
-    
-    
 
  
-    
-    
+

@@ -14,7 +14,6 @@ import gpflow.kernels as gfk
 from scipy.optimize import minimize #For optimizing
 
 from point.utils import check_random_state_instance
-from point.low_rank.low_rank_rff import LowRankRFF
 from point.misc import Space, TensorMisc
 
 
@@ -31,21 +30,29 @@ class PointsData():
         self.variables = trainable_variables
         
     @property
-    def num_sequences(self):
+    def n_batch(self):
         return self.locs.shape[0]
+    
+    @property
+    def size(self, batch_index  = 0):
+        return len(self.locs[batch_index ])
+
         
     def shuffled_index(self, n_batch, random_state = None):
-        random_state = check_random_state_instance(random_state)
-        shuffled_idx = np.arange(self.num_sequences)
+        shuffled_idx = np.arange(self.n_batch)
         random_state.shuffle(shuffled_idx)
-        shuffled_idx = shuffled_idx[- n_batch :]
+        if n_batch is not None and n_batch < self.n_batch :
+           random_state = check_random_state_instance(random_state)
+           random_state.shuffle(shuffled_idx)
+           shuffled_idx = shuffled_idx[- n_batch :]
+        
         return shuffled_idx
         
     def plot_points(self, batch_index = 0):
         plt.figure()
         size = self.sizes[batch_index]
         plt.scatter(self.locs[batch_index][0:size,0], self.locs[batch_index][0:size,1], edgecolor='b', facecolor='none', alpha=0.5 );
-        plt.xlim(-1, 1); plt.ylim(-1, 1)
+        plt.xlim(*self.space); plt.ylim(*self.space)
         plt.xlabel("x1"); plt.ylabel("x2")
         plt.show()
         
@@ -104,7 +111,7 @@ class CoxLowRankSpatialModel() :
             loss = self.lrgp.maximum_log_likelihood_objective(points)
 
         grad = tape.gradient(loss, self.trainable_variables) 
-    
+
         return (loss, grad)
         
 
@@ -174,9 +181,9 @@ class CoxLowRankSpatialModel() :
  
             full_points  = HomogeneousSpatialModel(lambdaMax, self.space, random_state= random_state).generate()
       
-            lambdas =  self.lrgp.func(tf.constant(full_points, dtype=default_float()))**2
+            lambdas =  self.lrgp.lambda_func(tf.constant(full_points, dtype=default_float()))
             lambdas = lambdas.numpy()
-            
+ 
             n_lambdas = lambdas.shape[0]
             if do_clipping is True : lambdas = np.clip(lambdas, 0, lambdaMax)
 
@@ -191,7 +198,7 @@ class CoxLowRankSpatialModel() :
             sizes.append(n_points)
             
             if calc_grad  :
-               loss, grad = self.compute_loss_and_gradients(retained_points)
+               _, grad = self.compute_loss_and_gradients(retained_points)
                grad = TensorMisc().pack_tensors(grad)
                grad_lst.append(grad)
 
@@ -218,24 +225,38 @@ class CoxLowRankSpatialModel() :
 
 if __name__ == "__main__":
     
-    rng = np.random.RandomState()
-    sp = Space([-1,1])
+    import gpflow
+    from point.low_rank.low_rank_rff import LowRankRFF
+    from point.low_rank.low_rank_rff_ortho import LowRankRFFOrthogonal
+    from point.low_rank.low_rank_nystrom import LowRankNystrom
     
-    variance = tf.Variable([8], dtype=default_float(), name='sig')
+    rng = np.random.RandomState()
+    sp = Space([-10,10])
+
+    variance = tf.Variable([5], dtype=default_float(), name='sig')
     length_scale = tf.Variable([0.5], dtype=default_float(), name='l')
     kernel = gfk.SquaredExponential(variance= variance , lengthscales= length_scale)
-    beta0 = tf.Variable([0.5], dtype=default_float(), name='beta0')
+    beta0 = tf.Variable([0.1], dtype=default_float(), name='beta0')
 
-    lrgp = LowRankRFF(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng)
-    lrgp.fit()
-
-    X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
+    #lrgp = LowRankRFF(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng).fit()
+    lrgp = LowRankRFFOrthogonal(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng).fit()
+    #lrgp = LowRankNystrom(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng,  mode = 'sampling').fit()
+    #lrgp = LowRankNystrom(kernel, beta0 = beta0, space = sp, n_components =  250, random_state = rng,  mode = 'grid').fit()
+    
+    #X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
     process = CoxLowRankSpatialModel(lrgp, random_state = rng)
-    data = process.generate(verbose = False, n_warm_up = 10000, batch_size =10, calc_grad = True)
+    #gpflow.set_trainable(process.lrgp.beta0, False)
+    
+    print(process.lrgp.integral())
 
-    process.lrgp.plot_kernel()
-    process.lrgp.plot_surface()
-    data.plot_points()
+    
+    print("")
+    data = process.generate(verbose = False, n_warm_up = 10000, batch_size =10, calc_grad = True)
+    print(data.sizes)
+
+    #process.lrgp.plot_kernel()
+    #process.lrgp.plot_surface()
+    #data.plot_points()
     
 
 

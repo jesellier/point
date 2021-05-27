@@ -74,11 +74,34 @@ def tf_calc_Psi_matrix_SqExp(Z, variance, lengthscales, domain):
 
     exp_arg = tf.reduce_sum(-tf.square(z1 - z2) / (4.0 * tf.square(lengthscales)), axis=2)
 
-    erf_val = tf.math.erf((zm - Tmin) * inv_lengthscales) - tf.math.erf(
-        (zm - Tmax) * inv_lengthscales
-    )
+    erf_val = tf.math.erf((zm - Tmin) * inv_lengthscales) - tf.math.erf((zm - Tmax) * inv_lengthscales)
     product = tf.reduce_prod(mult * erf_val, axis=2)
     out = tf.square(variance) * tf.exp(exp_arg + tf.math.log(product))
+    return out
+
+
+def tf_calc_Psi_vector_SqExp(z, variance, lengthscales, domain):
+    """
+    Calculates  Ψ(z) = ∫ K(z,x) dx  for the squared-exponential
+    RBF kernel with `variance` (scalar) and `lengthscales` vector (length D).
+    :param Z:  M x D array containing the positions of the inducing points.
+    :param domain:  D x 2 array containing lower and upper bound of each dimension.
+    Does not broadcast over leading dimensions.
+    """
+    
+    variance = tf.cast(variance, z.dtype)
+    lengthscales = tf.cast(lengthscales, z.dtype)
+
+    mult = tf.cast(np.sqrt(0.5 * np.pi), z.dtype) * lengthscales
+    inv_lengthscales = 1.0 / lengthscales
+
+    Tmin = domain[:, 0]
+    Tmax = domain[:, 1]
+    
+    erf_val = tf.math.erf(np.sqrt(0.5) * (z - Tmin) * inv_lengthscales) - tf.math.erf(np.sqrt(0.5) * (z - Tmax) * inv_lengthscales)
+    product = tf.reduce_prod(mult * erf_val, axis=1)
+    out = variance * product
+
     return out
     
 
@@ -87,18 +110,15 @@ class Test_Nystrom(unittest.TestCase):
      
     #def setUp(self):
     def setUp(self):
-        rng = np.random.RandomState(5)
-        variance = tf.Variable(8, dtype=float_type, name='sig')
-        length_scale = tf.Variable([0.2,0.2], dtype=float_type, name='l')
-        space = Space(-1,1)
-        self.process = get_process(length_scale = length_scale, variance = variance, 
-                                   space = space, method = method.NYST, n_components = 250, random_state = rng)
-        
-        self.X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
+        self.rng = np.random.RandomState(5)
+        self.variance = tf.Variable(1, dtype=float_type, name='sig')
+        self.length_scale = tf.Variable([1,1], dtype=float_type, name='l')
+        self.space = Space([-1,1])
 
 
     def test_singularity(self):
-        process = self.process
+        process = get_process(length_scale = self.length_scale, variance = self.variance, 
+                                   space = self.space, method = method.NYST, n_components = 250, random_state = self.rng)
         s = process.lrgp._lambda.numpy()
 
         eps = eigvalsh_to_eps(s, None, None)
@@ -108,75 +128,126 @@ class Test_Nystrom(unittest.TestCase):
         #     raise ValueError('the input matrix must be positive semidefinite')
         # if len(d) < len(s) :
         #     raise np.linalg.LinAlgError('singular matrix')
-            
-        #the input matrix must be positive semidefinite
-        self.assertTrue(not (np.min(s) < -eps))
-        
-        #the input matrix must be singular
-        self.assertTrue(not (len(d) < len(s)))
+
+        self.assertTrue(not (np.min(s) < -eps))  #the input matrix must be positive semidefinite
+        self.assertTrue(not (len(d) < len(s)))   #the input matrix must be singular
         
 
     def test_func_recalculation(self):
-        X = self.X
-        lrgp = self.process.lrgp
         
-        f = lrgp.func(X)
-        f = f.numpy()
+        process = get_process(length_scale = self.length_scale, variance = self.variance, 
+                                   space = self.space, method = method.NYST, n_components = 250, random_state = self.rng)
+        lrgp = process.lrgp
+        X = tf.constant(rng.normal(size = [10, 2]), dtype=float_type, name='X')
 
+        f = lrgp.func(X).numpy()
         feature = lrgp.feature(X)
-        w = tf.linalg.diag(tf.math.sqrt(lrgp._lambda)) @ lrgp.latent_
+        w = tf.linalg.diag(tf.math.sqrt(lrgp._lambda)) @ lrgp._latent
         f_recalc = feature @ w
         f_recalc = f_recalc.numpy()
 
         for i in range(f.shape[0]):
             self.assertAlmostEqual(f[i][0], f_recalc[i][0], places=7)
             
-              
-    def test_eigenfunction_integral(self):
-        lrgp = self.process.lrgp
-        w = tf.linalg.diag(tf.math.sqrt(lrgp._lambda)) @ lrgp.latent_
-        bounds = lrgp.space.bounds1D
+ 
+    def test_prod_kernel_integral(self):
         
-        #x = self.X[0]
-        index_i = 0
-        index_j = 0
+        variance = self.variance
+        length_scale = self.length_scale
 
-        U = lrgp._U
-        #test = tf.math.reduce_sum(lrgp._impl_kernel(x, lrgp._x) * U[:, index_i]) * tf.math.reduce_sum(lrgp._impl_kernel(x, lrgp._x) * U[:, index_j]) 
-        
-        #def func(x,y):
-            #points = tf.constant([x,y], dtype=float_type)
-            #out = tf.math.reduce_sum(lrgp._impl_kernel(points, lrgp._x) * U[:, index_i]) * tf.math.reduce_sum(lrgp._impl_kernel(points, lrgp._x) * U[:, index_j]) 
-            #return out
+        process = get_process(length_scale = length_scale, variance = variance, 
+                                   space = self.space, method = method.NYST, n_components = 2, random_state = self.rng)
+        lrgp = process.lrgp
+        bounds = lrgp.space.bounds1D
+
+        def integral_ker(index_i, index_j) :
             
-        def func_ker(x,y):
-            point = tf.constant([x,y], dtype=float_type)
-            out = lrgp._impl_kernel(point, lrgp._x[index_i]) * lrgp._impl_kernel(point, lrgp._x[index_j])
+            def func_ker(x,y):
+                point = tf.constant([x,y], dtype=float_type)
+                out = lrgp.kernel(point, lrgp._x[index_i]) * lrgp.kernel(point, lrgp._x[index_j])
+                return out
+    
+            integral_ker = integrate.dblquad( lambda x,y: func_ker(x,y), bounds[0], bounds[1],bounds[0], bounds[1])
+            return integral_ker[0]
+
+        M = tf_calc_Psi_matrix_SqExp(lrgp._x, variance, length_scale,  domain = lrgp.space.bounds )
+        self.assertAlmostEqual(M[0,0].numpy(), integral_ker(0, 0) , places=7)
+        self.assertAlmostEqual(M[0,1].numpy(), integral_ker(0, 1) , places=7)
+        self.assertAlmostEqual(M[1,1].numpy(), integral_ker(1, 1) , places=7)
+        
+        
+    def test_kernel_integral(self):
+        
+        variance = tf.Variable(3, dtype=float_type, name='sig')
+        length_scale = tf.Variable([2,0.5], dtype=float_type, name='l') #self.length_scale
+        process = get_process(length_scale = length_scale, variance = variance, 
+                                   space = self.space, method = method.NYST, n_components = 2, random_state = self.rng)
+        lrgp = process.lrgp
+        bounds = lrgp.space.bounds1D
+
+        def integral_ker(index_i) :
+            
+            def func_ker(x,y):
+                point = tf.constant([x,y], dtype=float_type)
+                out = lrgp.kernel(point, lrgp._x[index_i])
+                return out
+    
+            integral_ker = integrate.dblquad( lambda x,y: func_ker(x,y), bounds[0], bounds[1], bounds[0], bounds[1])
+            return integral_ker[0]
+
+        phi = tf_calc_Psi_vector_SqExp(lrgp._x, variance, length_scale,  domain = lrgp.space.bounds )
+
+        self.assertAlmostEqual(phi[0].numpy(), integral_ker(0) , places=7)
+        self.assertAlmostEqual(phi[1].numpy(), integral_ker(1) , places=7)
+
+
+    def test_full_integral(self):
+        
+        variance = self.variance
+        length_scale = self.length_scale
+
+        process = get_process(length_scale = length_scale, variance = variance, 
+                                   space = self.space, method = method.NYST, n_components = 250, random_state = self.rng)
+        lrgp = process.lrgp
+        bounds = lrgp.space.bounds1D
+
+        def func(x,y):
+            points = tf.constant([x,y], dtype=float_type)
+            out = lrgp.func(points)**2
             return out
 
-        integral = integrate.dblquad( lambda x,y: func_ker(x,y), bounds[0], bounds[1],bounds[0], bounds[1])
-        print(integral[0])
+        M = tf_calc_Psi_matrix_SqExp(lrgp._x, variance, length_scale,  domain = lrgp.space.bounds )
         
-        #M = tf.random.uniform(shape = (250, 250), dtype=float_type)
-        #test = tf.transpose(U) @ M @ U
+        v = lrgp._v
+        out = tf.transpose(v) @ M @ v
+        out = out.numpy()[0][0]
         
-        #a = tf.reshape(tf.transpose(U[:, index_i]) , shape = (1,250))
-        #b = tf.reshape(U[:, index_j] , shape = (250,1))
-        #test2 = a @ M @ b
+        integral_recalc = integrate.dblquad( lambda x,y: func(x,y), bounds[0], bounds[1],bounds[0], bounds[1])
+        self.assertAlmostEqual(out, integral_recalc[0]  , places=7)
         
-        trainable = self.process.parameters
-        variance = trainable[1]
-        lengthscales = tf.square(trainable[0])
-        M = tf_calc_Psi_matrix_SqExp(lrgp._x, variance, lengthscales,  domain = lrgp.space.bounds )
-    
-        out = tf.transpose(U) @ M @ U
-        print(M[index_i, index_j])
         
+        
+    def test_full_integral_with_beta(self):
+        
+        variance = self.variance
+        length_scale = self.length_scale
+        beta0 = 0.5
 
+        process = get_process(beta0 = beta0, length_scale = length_scale, variance = variance, 
+                                   space = self.space, method = method.NYST, n_components = 250, random_state = self.rng)
+        lrgp = process.lrgp
+        bounds = lrgp.space.bounds1D
+
+        def func(x,y):
+            points = tf.constant([x,y], dtype=float_type)
+            out = (lrgp.func(points) + beta0)**2
+            return out
         
+        integral = lrgp.integral().numpy()
+        integral_recalc = integrate.dblquad( lambda x,y: func(x,y), bounds[0], bounds[1],bounds[0], bounds[1])
+        self.assertAlmostEqual(integral, integral_recalc[0]  , places=7)
 
-
-
+ 
 if __name__ == '__main__':
     unittest.main()
 

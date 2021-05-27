@@ -95,12 +95,6 @@ def _compute_loss_and_gradients():
 
     
 results = OptimScipy().minimize(closure = _compute_loss_and_gradients, variables = model.trainable_variables,compile = False)
-print(results)
-print(model.parameters)
-
-
-
-
 
 
 

@@ -106,7 +106,12 @@ class Test_Reward(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    #unittest.main()
+    x1 = np.random.randn(4)
+    z1 = tf.expand_dims(x1, 1)
+    z2 = tf.expand_dims(x1, 0)
+    test = z1 * z2
+    
 
  
     

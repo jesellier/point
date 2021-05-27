@@ -16,7 +16,7 @@ import numpy as np
 
 from point.point_process import PointsData
 
-Variables = Iterable[tf.Variables]
+Variables = Iterable[tf.Variable]
 PointSequences = Iterable[np.ndarray]  # deprecated
 Kernel = tfk.PositiveSemidefiniteKernel
 
@@ -38,9 +38,9 @@ class Reward():
     
         learner_l = cls.__concenat_vector(learner_l)
         expert_l = cls.__concenat_vector(expert_l) 
-        
-        mat_el = kernel.matrix(expert_l, learner_l)
-        mat_ll = kernel.matrix(learner_l, learner_l)
+
+        mat_el = kernel(expert_l, learner_l)
+        mat_ll = kernel(learner_l, learner_l)
     
         sum_el = tf.math.reduce_sum(mat_el , axis = 0)
         sum_ll = tf.math.reduce_sum(mat_ll , axis = 0)

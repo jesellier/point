@@ -23,6 +23,65 @@ from point.misc import Space
 from enum import Enum
 
 
+def tf_calc_Psi_matrix_SqExp(Z, variance, lengthscales, domain):
+    """
+    Calculates  Ψ(z,z') = ∫ K(z,x) K(x,z') dx  for the squared-exponential
+    RBF kernel with `variance` (scalar) and `lengthscales` vector (length D).
+    :param Z:  M x D array containing the positions of the inducing points.
+    :param domain:  D x 2 array containing lower and upper bound of each dimension.
+    Does not broadcast over leading dimensions.
+    """
+    variance = tf.cast(variance, Z.dtype)
+    lengthscales = tf.cast(lengthscales, Z.dtype)
+
+    mult = tf.cast(0.5 * np.sqrt(np.pi), Z.dtype) * lengthscales
+    inv_lengthscales = 1.0 / lengthscales
+
+    Tmin = domain[:, 0]
+    Tmax = domain[:, 1]
+
+    z1 = tf.expand_dims(Z, 1)
+    z2 = tf.expand_dims(Z, 0)
+
+    zm = (z1 + z2) / 2.0
+
+    exp_arg = tf.reduce_sum(-tf.square(z1 - z2) / (4.0 * tf.square(lengthscales)), axis=2)
+
+    erf_val = tf.math.erf((zm - Tmin) * inv_lengthscales) - tf.math.erf(
+        (zm - Tmax) * inv_lengthscales
+    )
+    product = tf.reduce_prod(mult * erf_val, axis=2)
+    out = tf.square(variance) * tf.exp(exp_arg + tf.math.log(product))
+    return out
+
+
+
+def tf_calc_Psi_vector_SqExp(z, variance, lengthscales, domain):
+    """
+    Calculates  Ψ(z) = ∫ K(z,x) dx  for the squared-exponential
+    RBF kernel with `variance` (scalar) and `lengthscales` vector (length D).
+    :param Z:  M x D array containing the positions of the inducing points.
+    :param domain:  D x 2 array containing lower and upper bound of each dimension.
+    Does not broadcast over leading dimensions.
+    """
+    
+    variance = tf.cast(variance, z.dtype)
+    lengthscales = tf.cast(lengthscales, z.dtype)
+
+    mult = tf.cast(np.sqrt(0.5 * np.pi), z.dtype) * lengthscales
+    inv_lengthscales = 1.0 / lengthscales
+
+    Tmin = domain[:, 0]
+    Tmax = domain[:, 1]
+    
+    erf_val = tf.math.erf(np.sqrt(0.5) * (z - Tmin) * inv_lengthscales) - tf.math.erf(np.sqrt(0.5) * (z - Tmax) * inv_lengthscales)
+    product = tf.reduce_prod(mult * erf_val, axis=1)
+    out =  variance * tf.expand_dims(product, 1)
+    return out
+    
+
+
+
 class LowRankNystrom(LowRankBase):
     
     class mode(Enum):
@@ -33,6 +92,9 @@ class LowRankNystrom(LowRankBase):
     def __init__(self, kernel, beta0 = None, space = Space(), n_components = 250, random_state = None, mode = 'grid'):
         
         super().__init__(kernel, beta0, space, n_components, random_state)
+        
+        if not isinstance(kernel, gfk.SquaredExponential):
+            raise NotImplementedError(" 'kernel' must of 'gfk.SquaredExponential' type")
 
         self._jitter = 1e-5
 
@@ -47,7 +109,7 @@ class LowRankNystrom(LowRankBase):
         if sample : self.sample()
 
         self.__evd()
-        self._vl =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self._latent
+        self._v =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self._latent
         self._is_fitted = True
         
         return self
@@ -67,7 +129,7 @@ class LowRankNystrom(LowRankBase):
 
    
     def __sample_x(self):
-        random_state = check_random_state_instance(self.random_state)
+        random_state = check_random_state_instance(self._random_state)
         bounds = self.space.bounds
         sample = tf.constant(random_state.uniform(bounds[:, 0], bounds[:, 1], size=(self.n_components, self.n_features)), 
                              dtype=default_float(), 
@@ -106,7 +168,7 @@ class LowRankNystrom(LowRankBase):
         K = self.kernel(self._x, self._x)
         K_jitter_matrix = self._jitter * tf.eye(K.shape[0], dtype=default_float()) 
         K += K_jitter_matrix
-        self._lambda, self._U, V = tf.linalg.svd(K)
+        self._lambda, self._U, _ = tf.linalg.svd(K)
         
         
     def __validate_entry(self, X):
@@ -140,7 +202,7 @@ class LowRankNystrom(LowRankBase):
             raise ValueError("instance not fitted")
         
         X = self.__validate_entry(X)
-        return self.kernel(X, self._x) @ self._vl + self.beta0 
+        return self.kernel(X, self._x) @ self._v
 
 
     def __call__(self, X):
@@ -152,22 +214,30 @@ class LowRankNystrom(LowRankBase):
 
 
     def integral(self, bounds = None):
-        out = tf.transpose(self._latent) @ tf.linalg.diag(tf.math.sqrt(self._lambda)) @ self._latent
-        out =  (self.space.measure / self.n_components) * out
-        out = out[0][0]
-        return out
         
+        if bounds is None :
+            bounds = self.space.bounds
+        
+        variance = self.kernel.variance
+        lengthscales = self.kernel.lengthscales
     
-    def maximum_log_likelihood_objective(self, X):
+        M = tf_calc_Psi_matrix_SqExp(self._x, variance, lengthscales,  domain = bounds )
+        integral = tf.transpose(self._v) @ M @ self._v
         
-        bounds = self.space.bounds
-        int_term = self.integral(bounds)
+        m = tf_calc_Psi_vector_SqExp(self._x, variance, lengthscales,  domain = bounds )
+        integral += 2 * self.beta0 *  tf.transpose(m) @ self._v
+        integral += self.beta0**2  * self.space.measure
+        integral = integral[0][0]
 
-        f = self.func(X)
-        sum_term = tf.norm(f)
-        sum_term = tf.math.square(sum_term)
-            
-        out = sum_term - int_term
+        return integral
+
+
+    def maximum_log_likelihood_objective(self, X):
+
+        int_term = self.integral()
+        sum_term = sum(self.lambda_func(X))
+        out = - int_term + sum_term
+
         return out
     
     
@@ -186,8 +256,8 @@ if __name__ == "__main__":
     lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
     print(lrgp.integral())
     X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
-    print(lrgp.maximum_log_likelihood_objective(X))
-    print(lrgp.func(X))
+    #print(lrgp.maximum_log_likelihood_objective(X))
+    #print(lrgp.func(X))
 
     lrgp.plot_kernel()
     lrgp.plot_surface()
