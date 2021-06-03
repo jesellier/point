@@ -19,7 +19,7 @@ from vbpp.model import VBPP
 
 
 ################LOAD SYNTH DATA
-directory = "D:\GitHub\point\data\data_rff_small"
+directory = "D:\GitHub\point\data"
 expert_seq = np.load(directory + "\data_synth_points.npy")
 expert_variables = np.load(directory + "\data_synth_variables.npy", allow_pickle=True)
 expert_space = np.load(directory + "\data_synth_space.npy", allow_pickle=True)
@@ -35,11 +35,11 @@ variance = tf.Variable([tmp**2], dtype= default_float(), name='sig')
 length_scale = tf.Variable(tf.random.uniform(shape = [1], minval=0, maxval = 1, dtype= default_float()), name='lengthscale')
 beta0 = tf.Variable([0.2], dtype=default_float(), name='beta0')
 
-initial_learning_rate = 1.0
+initial_learning_rate = 0.8
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate,
-    decay_steps= 10,
-    decay_rate=0.8,
+    decay_steps= 5,
+    decay_rate=0.9,
     staircase=True
     )
     
@@ -74,7 +74,7 @@ def build_model(events, space):
 
 
 ####### HYPER PARAMETERS
-num_epochs = 1
+num_iter = 100
 n_batch = 500
 
 t0 = time.time()
@@ -97,7 +97,7 @@ def compute_loss_and_gradients(loss_closure, variables):
     grads = tape.gradient(loss, variables)
     return loss, grads
 
-for epoch in range(num_epochs):
+for i in range(num_iter):
 
     batch_ids = expert_data.shuffled_index(n_batch, random_state = rng)
     grads = TensorMisc().pack_tensors_to_zeros(variables)
@@ -107,8 +107,8 @@ for epoch in range(num_epochs):
     num_iter = 0
     
     print("")
-    print("start [%s] %d-th epoch : " % \
-            (arrow.now(), epoch+1))
+    print("start [%s] %d-th iter : " % \
+            (arrow.now(), i+1))
         
 
     for event_id in batch_ids :
@@ -144,9 +144,6 @@ for epoch in range(num_epochs):
         
 #directory = "D:\GitHub\point\exprmt"
 #np.save(directory + "\data_vbb_2.npy", results)
-
-
-        
 
 
 

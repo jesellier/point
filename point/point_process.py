@@ -231,7 +231,7 @@ if __name__ == "__main__":
     from point.low_rank.low_rank_nystrom import LowRankNystrom
     
     rng = np.random.RandomState()
-    sp = Space([-10,10])
+    sp = Space([-1,1])
 
     variance = tf.Variable([5], dtype=default_float(), name='sig')
     length_scale = tf.Variable([0.5], dtype=default_float(), name='l')
@@ -255,8 +255,10 @@ if __name__ == "__main__":
     print(data.sizes)
 
     #process.lrgp.plot_kernel()
-    #process.lrgp.plot_surface()
+    process.lrgp.plot_surface()
     #data.plot_points()
+    
+    
     
 
 
