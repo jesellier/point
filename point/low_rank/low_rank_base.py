@@ -5,6 +5,7 @@ Created on Fri Jan 15 13:36:21 2021
 @author: jesel
 """
 import numpy as np
+import tensorflow as tf
 
 from point.misc import Space
 import matplotlib.pyplot as plt
@@ -33,40 +34,85 @@ class LowRankBase(gpflow.models.GPModel, metaclass=abc.ABCMeta):
         
         if beta0 is None :
             self.beta0 = Parameter([1e-10], transform=positive(), name = "beta0")
+            self.hasOffset = False
             gpflow.set_trainable(self.beta0, False)
         else :
             self.beta0 = Parameter(beta0, transform=positive(), name = "beta0")
+            self.hasOffset = True
         
         self._is_fitted = False
         self._random_state = random_state
         
+        
+    @property
+    def lengthscales(self):
+        return self.kernel.lengthscales
+    
+    @property
+    def variance(self):
+        return self.kernel.variance
+   
+    @property
+    def gradient_adjuster(self):
+        adjv = ( (tf.exp(self.variance) - 1)/ tf.exp(self.variance)) 
+        adjl = ((tf.exp( self.lengthscales) - 1) / tf.exp( self.lengthscales) )
+        adjuster = tf.experimental.numpy.vstack([tf.expand_dims(adjl,1), tf.expand_dims(adjv,0)])
+        return adjuster
+    
 
+    def validate_entry(self, X):
+        if len(X.shape) == 1:
+            n_features = X.shape[0]
+            X = tf.reshape(X, (1, n_features))
+        else :
+            _, n_features = X.shape
+        return X
+         
+ 
     def lambda_func(self, X):
         return (self.func(X) + self.beta0)**2
-        
+
+
+    def func(self, X) :
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+        X = self.validate_entry(X)
+        return self.feature(X) @ self._latent
+    
+    
+    def maximum_log_likelihood_objective(self, X):
+        int_term = self.integral()
+        sum_term = sum(tf.math.log(self.lambda_func(X)))
+        out = - int_term + sum_term 
+        return out
+    
+    
+    def predict_f(self, Xnew):
+        raise NotImplementedError
+
     @abc.abstractmethod 
     def fit(self, sample = True):
         raise NotImplementedError()
         
     @abc.abstractmethod 
-    def sample(self):
+    def sample(self, latent_only = False):
         raise NotImplementedError()
         
     @abc.abstractmethod 
     def feature(self, X):
         raise NotImplementedError()
-
-    @abc.abstractmethod 
-    def func(self, X) :
-          raise NotImplementedError()
  
     @abc.abstractmethod 
     def __call__(self, X):
          raise NotImplementedError()
 
     @abc.abstractmethod 
-    def integral(self, bounds = None):
+    def integral(self, bound = None):
          raise NotImplementedError()
+    
+    @abc.abstractmethod 
+    def M(self, bound = None):
+        raise NotImplementedError()
 
 
     def plot_surface(self, grid_size = 40):

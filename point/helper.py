@@ -9,8 +9,9 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfk = tfp.math.psd_kernels
 
-from point.point_process import CoxLowRankSpatialModel
+from point.model import CoxLowRankSpatialModel
 from point.low_rank.low_rank_rff import LowRankRFF
+from point.low_rank.low_rank_rff_no_offset import LowRankRFFnoOffset
 from point.low_rank.low_rank_nystrom import LowRankNystrom
 from point.misc import Space
 
@@ -31,10 +32,11 @@ def defaultArgs():
 class method(Enum):
     NYST = 1
     RFF = 2
-    NYST_SAMPLING = 3
-    NYST_GRID = 4
-    COMP_POLY = 5
-    
+    RFF_NO_OFFSET = 3
+    NYST_SAMPLING = 4
+    NYST_DATA = 5
+    NYST_GRID = 6
+
     
 def get_lrgp(method =method.RFF, space = Space(), n_components = 250, random_state = None, **kwargs):
     
@@ -48,16 +50,25 @@ def get_lrgp(method =method.RFF, space = Space(), n_components = 250, random_sta
         kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
         lrgp = LowRankRFF(kernel, beta0 = beta0,space = space, n_components =  n_components, random_state = random_state)
         lrgp.fit()
+        
+    if method == method.RFF_NO_OFFSET:
+        kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
+        lrgp = LowRankRFFnoOffset(kernel, beta0 = beta0,space = space, n_components =  n_components, random_state = random_state)
+        lrgp.fit()
     
     elif method == method.NYST or method == method.NYST_GRID :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
-         lrgp = LowRankNystrom(kernel, beta0 = beta0, space = space, n_components =  n_components, random_state = random_state)
+         lrgp = LowRankNystrom(kernel, beta0 = beta0, space = space, n_components =  n_components, random_state = random_state, mode = 'grid')
          lrgp.fit()
     
-    elif method == method.NYST or method == method.NYST_SAMPLING :
+    elif method == method.NYST_SAMPLING :
          kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
          lrgp = LowRankNystrom(kernel, beta0 = beta0, space = space, n_components =  n_components, random_state = random_state, mode = 'sampling')
          lrgp.fit()
+         
+    elif method == method.NYST_DATA :
+         kernel = gfk.SquaredExponential(variance= variance, lengthscales= length_scale)
+         lrgp = LowRankNystrom(kernel, beta0 = beta0, space = space, n_components =  n_components, random_state = random_state, mode = 'data_based')
 
     return lrgp
 
