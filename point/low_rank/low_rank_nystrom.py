@@ -85,11 +85,12 @@ def tf_calc_Psi_vector_SqExp(z, variance, lengthscales, domain):
 class LowRankNystrom(LowRankBase):
     
     class mode(Enum):
-        SAMPLING = 1
-        GRID = 2
+        SAMPLING_SPACE = 1
+        SAMPLING_DATA = 2
+        GRID = 3
 
 
-    def __init__(self, kernel, beta0 = None, space = Space(), n_components = 250, random_state = None, mode = 'grid'):
+    def __init__(self, kernel, beta0 = None, space = Space(), n_components = 250, X = None, random_state = None, mode = 'grid'):
         
         super().__init__(kernel, beta0, space, n_components, random_state)
         
@@ -97,51 +98,76 @@ class LowRankNystrom(LowRankBase):
             raise NotImplementedError(" 'kernel' must of 'gfk.SquaredExponential' type")
 
         self._jitter = 1e-5
+        self._do_truncation = False
+        self._trunc_threshold = 1e-05
+        self._X = X
 
         if mode == 'sampling' :
-            self.mode = LowRankNystrom.mode.SAMPLING
-        else :
+            self.mode = LowRankNystrom.mode.SAMPLING_SPACE
+        elif  mode == 'grid' :
             self.mode = LowRankNystrom.mode.GRID
+        elif mode == 'data_based' :
+            self.mode = LowRankNystrom.mode.SAMPLING_DATA
+        else :
+            raise ValueError("Mode not recognized")
       
-
         
     def fit(self, sample = True):
         if sample : self.sample()
-
         self.__evd()
-        self._v =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self._latent
         self._is_fitted = True
         
         return self
 
-    def sample(self):
+    def sample(self, latent_only = False):
         random_state = check_random_state_instance(self._random_state)
-        self._latent = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=default_float(), name='beta')
+        self._latent = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=default_float(), name='w')
+        if latent_only : return
         
-        if self.mode == LowRankNystrom.mode.SAMPLING :
+        if self.mode == LowRankNystrom.mode.SAMPLING_SPACE :
             self.__sample_x()
         elif self.mode == LowRankNystrom.mode.GRID :
             self.__grid_x()
+        elif self.mode == LowRankNystrom.mode.SAMPLING_DATA :
+            self.__data_x()
         else :
             raise ValueError("Mode not recognized")
+        pass
   
-        self.fit(sample = False)
+    
+    def set_data(self, X):
+        self._X = X
+        pass
+    
+    def set_truncation(self, trunc_threshold):
+        self._do_truncation = True
+        self._trunc_threshold = trunc_threshold
+        
 
-   
     def __sample_x(self):
         random_state = check_random_state_instance(self._random_state)
         bounds = self.space.bounds
         sample = tf.constant(random_state.uniform(bounds[:, 0], bounds[:, 1], size=(self.n_components, self.n_features)), 
                              dtype=default_float(), 
                              name='x')
-        
         self._x = sample
-
         
+        
+    def __data_x(self):
+        if self._X is None :
+            raise ValueError("No dataset instanciated")
+
+        random_state = check_random_state_instance(self._random_state)
+        shuffled_idx = np.arange(self._X.shape[0])
+        random_state.shuffle(shuffled_idx)
+        shuffled_idx = shuffled_idx[0: self.n_components]
+        self._x = tf.convert_to_tensor(self._X[shuffled_idx, :], dtype=default_float())
+ 
+    
     def __grid_x(self):
         
         random_state = check_random_state_instance(self._random_state)
-        bounds = self.space.bounds1D
+        bounds = self.space.bound1D
         
         step = 1/np.sqrt(self.n_components)
         x = np.arange(bounds[0], bounds[1], step)
@@ -162,22 +188,22 @@ class LowRankNystrom(LowRankBase):
         sample = tf.constant(inputs, dtype=default_float(), name='x')
         self._x = sample
         
-        
-        
+
     def __evd(self):
         K = self.kernel(self._x, self._x)
-        K_jitter_matrix = self._jitter * tf.eye(K.shape[0], dtype=default_float()) 
-        K += K_jitter_matrix
+        #K += self._jitter * tf.eye(K.shape[0], dtype=default_float()) 
         self._lambda, self._U, _ = tf.linalg.svd(K)
-        
-        
-    def __validate_entry(self, X):
-        if len(X.shape) == 1:
-            n_features = X.shape[0]
-            X = tf.reshape(X, (1, n_features))
-        else :
-            _, n_features = X.shape
-        return X
+
+        if self._do_truncation  :
+            num_truncated = tf.reduce_sum(tf.cast(self._lambda < self._trunc_threshold, tf.int64)).numpy()
+            if  num_truncated  > 0 :
+                n = self.n_components - num_truncated
+                self._lambda = self._lambda[0:n]
+                self._U = self._U[:, 0: n]
+                self.n_components = self._lambda.shape[0]
+                self.sample(latent_only = True)
+                print("n_components recasted_to :=" + str(self.n_components))   
+        pass
 
 
     def inv(self):
@@ -191,77 +217,71 @@ class LowRankNystrom(LowRankBase):
         if not self._is_fitted :
             raise ValueError("instance not fitted")
         
-        X = self.__validate_entry(X)
-        out = self.kernel(X, self._x) @ self._U @ tf.linalg.diag(1/self._lambda)
-
-        return out
+        X = self.validate_entry(X)
+        return self.kernel(X, self._x) @ self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda))
     
     
-    def func(self, X) :
-        if not self._is_fitted :
-            raise ValueError("instance not fitted")
-        
-        X = self.__validate_entry(X)
-        return self.kernel(X, self._x) @ self._v
-
 
     def __call__(self, X):
         if not self._is_fitted :
             raise ValueError("instance not fitted")
-        X = self.__validate_entry(X)
+        X = self.validate_entry(X)
         K = self.kernel(X, self._x)
         return K @ self.inv() @ tf.transpose(K)
 
 
-    def integral(self, bounds = None):
+    def integral(self, bound = None):
         
-        if bounds is None :
-            bounds = self.space.bounds
+        if bound is None :
+            bound = self.space.bound
         
         variance = self.kernel.variance
         lengthscales = self.kernel.lengthscales
-    
-        M = tf_calc_Psi_matrix_SqExp(self._x, variance, lengthscales,  domain = bounds )
-        integral = tf.transpose(self._v) @ M @ self._v
         
-        m = tf_calc_Psi_vector_SqExp(self._x, variance, lengthscales,  domain = bounds )
-        integral += 2 * self.beta0 *  tf.transpose(m) @ self._v
-        integral += self.beta0**2  * self.space.measure
+        v =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda)) @ self._latent
+        Psi = tf_calc_Psi_matrix_SqExp(self._x, variance, lengthscales,  domain = bound )
+        integral = tf.transpose(v) @ Psi @ v
+        
+        if self.hasOffset is True :
+            m = tf_calc_Psi_vector_SqExp(self._x, variance, lengthscales,  domain = bound )
+            integral += 2 * self.beta0 *  tf.transpose(m) @ v
+            integral += self.beta0**2  * self.space.measure
+        
         integral = integral[0][0]
-
         return integral
-
-
-    def maximum_log_likelihood_objective(self, X):
-
-        int_term = self.integral()
-        sum_term = sum(self.lambda_func(X))
-        out = - int_term + sum_term
-
-        return out
     
     
-    def predict_f(self, Xnew):
-        raise NotImplementedError
+    def M(self, bound = None):
+        
+        if bound is None :
+            bound = self.space.bound
 
-    
+        variance = self.kernel.variance
+        lengthscales = self.kernel.lengthscales
+        u  =  self._U @ tf.linalg.diag(1/tf.math.sqrt(self._lambda))
+        Psi = tf_calc_Psi_matrix_SqExp(self._x, variance, lengthscales,  domain = bound )
+        
+        return tf.transpose(u) @ Psi @ u
 
-if __name__ == "__main__":
 
+
+if __name__ == '__main__':
+
+    import gpflow
     rng  = np.random.RandomState(10)
+    X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float())
     variance = tf.Variable(5, dtype=default_float(), name='sig')
     length_scale = tf.Variable(0.5, dtype=default_float(), name='lenght_scale')
-    kernel = gfk.SquaredExponential(lengthscales= length_scale, variance= variance )
-    
-    lrgp = LowRankNystrom(kernel, n_components = 250, random_state=rng, mode = 'grid').fit()
-    print(lrgp.integral())
-    X = tf.constant(rng.normal(size = [10, 2]), dtype=default_float(), name='X')
-    #print(lrgp.maximum_log_likelihood_objective(X))
-    #print(lrgp.func(X))
+    kernel = gpflow.kernels.SquaredExponential(lengthscales= 0.5, variance= 1)
+    K1 = kernel(X).numpy()
 
-    lrgp.plot_kernel()
-    lrgp.plot_surface()
+    lrk = LowRankNystrom(kernel, n_components = 75, X = X, random_state= rng)
+    lrk.fit()
+    K2 = lrk(X).numpy()
+
+
 
     
+
 
     

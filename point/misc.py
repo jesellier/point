@@ -8,11 +8,8 @@ import numpy as np
 
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
 
-import scipy.optimize
 import tensorflow as tf
 
-Variables = Iterable[tf.Variable] 
-LossClosure = Callable[[], tf.Tensor]
 
 
 
@@ -23,15 +20,15 @@ class Space():
         
     
     @property
-    def bounds(self):
-        return self.bounds2D
+    def bound(self):
+        return self.bound2D
     
     @property
-    def bounds2D(self):
+    def bound2D(self):
         return np.array([[self._lower_bound,   self._higher_bound ], [ self._lower_bound,  self._higher_bound ]]) 
     
     @property
-    def bounds1D(self):
+    def bound1D(self):
         return np.array((self._lower_bound,  self._higher_bound )) 
         
     @property
