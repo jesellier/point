@@ -153,7 +153,7 @@ with pm.Model() as Centered_eight:
     x  = pm.Normal('w', mu= 0, sigma=1, shape= n )  
     pm.Potential("likelihood", logl(x))
     
-    trace = pm.sample(10, tune = 10, cores = 1, chains=2, 
+    trace = pm.sample(10, tune = 10, cores = 2, chains=2, 
                       compute_convergence_checks = True, 
                       return_inferencedata=True,
                       discard_tuned_samples = discard_tuned_samples
