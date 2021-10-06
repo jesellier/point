@@ -13,7 +13,6 @@ from gpflow.config import default_float
 
 
 
-
 def build_data_400():
     dim = 2
     num = 200

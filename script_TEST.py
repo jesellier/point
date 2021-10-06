@@ -1,6 +1,7 @@
 
 import numpy as np
-import time
+from numpy import genfromtxt
+import math
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -12,9 +13,9 @@ from gpflow.config import default_float
 
 from point.laplace import LaplaceApproximation
 from point.helper import get_process, method
-from point.metrics import Evaluation
+from point.misc import Space
 
-from data_2D import build_data_1000, build_data_400,  domain_grid, print_grid, get_synthetic_generative_model, lambda_synth_1000, lambda_synth_400
+from data_2D import get_synthetic_generative_model
 
 import theano
 import theano.tensor as tt
@@ -23,10 +24,20 @@ import arviz as az
 theano.config.compute_test_value = "ignore"
 
 import pymc3 as pm
-
-import seaborn as sb
 import matplotlib.pyplot as plt
 
+
+#global
+beta = 1e-06
+
+def import_data():
+    directory = "D:\GitHub\point\data_synth_TEST.csv"
+    data = genfromtxt(directory, delimiter=',')
+    lambda_sample = data[:,2]
+    grid = data[:,0:2]
+    lambda_sample = tf.expand_dims(tf.convert_to_tensor(lambda_sample, dtype=default_float()),1)
+    bound = (int(grid.min()), int(math.ceil(grid.max())))
+    return lambda_sample, grid, Space(bound)
 
 
 def get_rff_model(space):
@@ -45,41 +56,10 @@ def get_rff_model(space):
     return LaplaceApproximation(model) 
 
 
-def optim_func(model, verbose = False):
+def optim_func(model):
+    model._optimize_mode(optimizer = "scipy", maxiter = 1)
 
-    t0 = time.time()
     
-    model._optimize_mode(optimizer = "scipy", maxiter = 2)
-    #model._optimize_mode(optimizer = "line_search", n_seeds = 100, restarts= 1, maxiter = 50, verbose = False) 
-    
-    for _ in range(1):
-        model.optimize(optimizer = "scipy_autodiff",  maxiter = 2)
-        model._optimize_mode(optimizer = "scipy", maxiter = 2) 
-
-    if verbose :
-        print("TOTAL finished_in := [%f] " % (time.time() - t0))
-        print(model.log_posterior())
-        print(model.log_marginal_likelihood())
-        print(model.lrgp.trainable_parameters)
-
-
-
-#fit model
-rng  = np.random.RandomState(10)
-
-lambda_truth, grid, space = lambda_synth_400()
-gpp = get_synthetic_generative_model(lambda_truth, grid, random_state = rng)
-lp = get_rff_model(space)
-
-#adjustement
-lp.lrgp._G = tf.Variable(lp.lrgp._G)
-X = gpp.generate()
-lp.set_X(X)
-optim_func(lp, verbose = True)
-
-
-###############################################################################################
-beta = 1e-06
 
 def likelihood_func(x, args):
     (M,F) = args
@@ -140,6 +120,22 @@ class LogLikeGrad(tt.Op):
 
 
 
+
+#### ###############   SCRIPT
+
+###fit model
+rng  = np.random.RandomState(10)
+lambda_truth, grid, space = import_data()
+gpp = get_synthetic_generative_model(lambda_truth, grid, random_state = rng)
+lp = get_rff_model(space)
+
+lp.lrgp._G = tf.Variable(lp.lrgp._G)
+X = gpp.generate()
+lp.set_X(X)
+optim_func(lp)
+
+
+### MCMC
 discard_tuned_samples= True
 n = lp.n_components
 F = lp.lrgp.feature(X).numpy()
@@ -148,12 +144,11 @@ M = lp.lrgp.M().numpy()
 args = (M,F)
 logl = LogLikeWithGrad(likelihood_func, gradient_func, args)
 
-
 with pm.Model() as Centered_eight:
     x  = pm.Normal('w', mu= 0, sigma=1, shape= n )  
     pm.Potential("likelihood", logl(x))
     
-    trace = pm.sample(10, tune = 10, cores = 2, chains=2, 
+    trace = pm.sample(10, tune = 10, cores = 1, chains=2, 
                       compute_convergence_checks = True, 
                       return_inferencedata=True,
                       discard_tuned_samples = discard_tuned_samples
