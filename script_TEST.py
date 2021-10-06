@@ -33,7 +33,7 @@ def get_rff_model(space):
 
     variance = tf.Variable(2.5, dtype=default_float(), name='sig')
     length_scale = tf.Variable([0.5,0.5], dtype=default_float(), name='lenght_scale')
-    n_components = 250
+    n_components = 25
 
     model = get_process(length_scale = length_scale, 
                 variance = variance, 
@@ -49,12 +49,12 @@ def optim_func(model, verbose = False):
 
     t0 = time.time()
     
-    model._optimize_mode(optimizer = "scipy", maxiter = 50)
+    model._optimize_mode(optimizer = "scipy", maxiter = 2)
     #model._optimize_mode(optimizer = "line_search", n_seeds = 100, restarts= 1, maxiter = 50, verbose = False) 
     
     for _ in range(1):
-        model.optimize(optimizer = "scipy_autodiff",  maxiter = 50)
-        model._optimize_mode(optimizer = "scipy", maxiter = 50) 
+        model.optimize(optimizer = "scipy_autodiff",  maxiter = 2)
+        model._optimize_mode(optimizer = "scipy", maxiter = 2) 
 
     if verbose :
         print("TOTAL finished_in := [%f] " % (time.time() - t0))
@@ -64,11 +64,10 @@ def optim_func(model, verbose = False):
 
 
 
-#%%
 #fit model
 rng  = np.random.RandomState(10)
 
-lambda_truth, grid, space = lambda_synth_1000()
+lambda_truth, grid, space = lambda_synth_400()
 gpp = get_synthetic_generative_model(lambda_truth, grid, random_state = rng)
 lp = get_rff_model(space)
 
@@ -78,16 +77,9 @@ X = gpp.generate()
 lp.set_X(X)
 optim_func(lp, verbose = True)
 
-lambda_mean = lp.predict_lambda(grid) 
-print_grid(grid, lambda_mean)
-print_grid(grid, lambda_truth)
-#print_grid(grid, lambda_truth, X)
 
-
-
-#%%
+###############################################################################################
 beta = 1e-06
-
 
 def likelihood_func(x, args):
     (M,F) = args
@@ -148,7 +140,6 @@ class LogLikeGrad(tt.Op):
 
 
 
-
 discard_tuned_samples= True
 n = lp.n_components
 F = lp.lrgp.feature(X).numpy()
@@ -162,30 +153,14 @@ with pm.Model() as Centered_eight:
     x  = pm.Normal('w', mu= 0, sigma=1, shape= n )  
     pm.Potential("likelihood", logl(x))
     
-    trace = pm.sample(20000, tune = 5000, cores = 1, chains=1, 
+    trace = pm.sample(10, tune = 10, cores = 1, chains=2, 
                       compute_convergence_checks = True, 
                       return_inferencedata=True,
                       discard_tuned_samples = discard_tuned_samples
                       )
 
-#trace_plot(trace.posterior.w.values[0,:,3])
 az.plot_trace(trace)
 s = az.summary(trace)
-
-
-#%%
-values = tf.convert_to_tensor(trace.posterior.w.values[0,:,:], dtype=default_float())
-lambda_mean_mcmc = tf.reduce_mean((lp.lrgp.feature(grid) @ tf.transpose(values))**2,1)
-print_grid(grid, lambda_mean_mcmc)
-print_grid(grid, lambda_truth)
-
-#%%
-import pickle
-with open('trace_test', 'wb') as handle:
-    pickle.dump(trace, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    
-with open('trace_test', 'rb') as handle:
-    trace= pickle.load(handle)
 
 
 
