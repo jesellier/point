@@ -1,11 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Apr 18 16:20:59 2021
-
-@author: jesel
-"""
 
 import numpy as np
+import copy
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
@@ -18,32 +14,65 @@ from point.utils import check_random_state_instance
 from point.misc import Space
 
 
+
 def expandedSum(x):
     z1 = tf.expand_dims(x, 1)
     z2 = tf.expand_dims(x, 0)
-
     return (z1 + z2, z1 - z2)
 
-def expamdedSumPerDimension(x):
+def expandedSum2D(x):
     Mp, Mm = expandedSum(x)
-    
     d1 = tf.stack([Mp[:,:,0] , tf.linalg.set_diag(Mm[:,:,0], tf.ones(x.shape[0],  dtype=default_float())) ])
     d2 = tf.stack([Mp[:,:,1] , tf.linalg.set_diag(Mm[:,:,1], tf.ones(x.shape[0],  dtype=default_float())) ])
-
     return (d1, d2)
+
+def expandedSum1D(x):
+    Mp, Mm = expandedSum(x)
+    d = tf.stack([Mp[:,:,0] , tf.linalg.set_diag(Mm[:,:,0], tf.ones(x.shape[0],  dtype=default_float())) ])
+    return d
 
 
 
 class LowRankRFFnoOffset(LowRankBase):
     
-    def __init__(self, kernel, beta0 = None, space = Space(), n_components = 75, random_state = None):
-       
-        super().__init__(kernel, beta0, space, n_components, random_state)
-        
+    def __init__(self, kernel, beta0 = None, space = Space(), n_components = 75, n_features = 2,  random_state = None):
+     
         if not isinstance(kernel, gfk.SquaredExponential):
             raise NotImplementedError(" 'kernel' must of 'gfk.SquaredExponential' type")
+    
+        if n_features == 1 and not (kernel.lengthscales.shape == [] or kernel.lengthscales.shape[0] == 1):
+            raise NotImplementedError("dimension of n_features:=" + str(n_features) + " not equal to legnscales_array_szie:=" + str(kernel.lengthscales.shape))
 
+        super().__init__(kernel, beta0, space, n_components, n_features, random_state)
+            
+        self._points_trainable = False
+        
+     
+    def copy_initial_parameters(self):
+        #lst = list(super().copy_initial_parameters())
+        #lst.append(self._points_trainable)
+        #tpl = tuple(lst)
+        tpl = list((self.variance, self.lengthscales, self.beta0, self._points_trainable))
+        return copy.deepcopy(tpl)
 
+    
+    def reset_initial_parameters(self, p, sample = True, zero_init = False):
+        super().reset_initial_parameters(p, sample = False)
+        if zero_init : self.initialize0()
+        elif sample : self.sample() 
+        self.set_points_trainable(p[3])
+        self.fit(sample = False)
+    
+    
+    def set_points_trainable(self, trainable):
+        if trainable is True :
+            self._points_trainable = True
+            self._G = tf.Variable(self._G)
+        else :
+            self._points_trainable = False
+            self._G = tf.constant(self._G)
+  
+    
     def sample(self, latent_only = False):
         random_state = check_random_state_instance(self._random_state)
         self._latent = tf.constant(random_state.normal(size = (2 * self.n_components, 1)), dtype=default_float(), name='latent')
@@ -51,6 +80,14 @@ class LowRankRFFnoOffset(LowRankBase):
         
         size = (self.n_features, self.n_components)
         self._G = tf.constant(random_state.normal(size = size), dtype=default_float(), name='G')
+        pass
+    
+    
+    def initialize0(self):
+        self._latent = tf.constant(np.zeros(shape = (2 * self.n_components, 1)), dtype=default_float(), name='latent')
+
+        size = (self.n_features, self.n_components)
+        self._G = tf.constant(np.zeros(shape = size), dtype=default_float(), name='G')
         pass
 
 
@@ -78,7 +115,7 @@ class LowRankRFFnoOffset(LowRankBase):
             
         if len(X.shape) == 1:
             n_features = X.shape[0]
-            X = tf.reshape(X, (1, n_features))
+            X = np.reshape(X, (1, n_features))
         else :
             _, n_features = X.shape
             
@@ -89,27 +126,33 @@ class LowRankRFFnoOffset(LowRankBase):
         features = tf.experimental.numpy.hstack([tf.cos(prod),tf.sin(prod)])
         features *= tf.sqrt(self.variance / self.n_components)
         
-        if self.lengthscales.shape == [] :
-                l1 = self.lengthscales
-                l2 = self.lengthscales
-        else :
-                l1 = self.lengthscales[0]
-                l2 = self.lengthscales[1]
-        
         if get_grad is True :
+            
+            if self.n_features == 2 :
+            
+                if self.lengthscales.shape == [] :
+                    l1 = self.lengthscales
+                    l2 = self.lengthscales
+                else :
+                    l1 = self.lengthscales[0]
+                    l2 = self.lengthscales[1]
+
+                v1 = tf.expand_dims(X[:,0],1) * tf.transpose(tf.expand_dims(self._random_weights[0,:],1))
+                dl1 = tf.experimental.numpy.hstack([ features[: , self.n_components :]  * v1, - features[:, 0: self.n_components]  * v1]) / l1
+                
+                v2 = tf.expand_dims(X[:,1],1) * tf.transpose(tf.expand_dims(self._random_weights[1,:],1))
+                dl2 = tf.experimental.numpy.hstack([features[: , self.n_components :]  * v2, - features[:, 0: self.n_components]  * v2]) / l2
+                
+                dl = tf.experimental.numpy.vstack([tf.expand_dims(dl1,0),tf.expand_dims(dl2,0)])
+            
+            else :
+                v = X * self._random_weights
+                dl = tf.experimental.numpy.hstack([ features[: , self.n_components :]  * v, - features[:, 0: self.n_components]  * v]) / self.lengthscales
+                dl = tf.expand_dims(dl,0)
+  
             dv = 0.5 * features / self.variance
+            grads = tf.experimental.numpy.vstack([dl, tf.expand_dims(dv,0)])
             
-            v1 = tf.expand_dims(X[:,0],1) * tf.transpose(tf.expand_dims(self._random_weights[0,:],1))
-            dl1 = tf.experimental.numpy.hstack([ features[: , self.n_components :]  * v1, - features[:, 0: self.n_components]  * v1]) / l1
-            
-            v2 = tf.expand_dims(X[:,1],1) * tf.transpose(tf.expand_dims(self._random_weights[1,:],1))
-            dl2 = tf.experimental.numpy.hstack([features[: , self.n_components :]  * v2, - features[:, 0: self.n_components]  * v2]) / l2
-            
-            grads = tf.experimental.numpy.vstack([
-                tf.expand_dims(dl1,0),
-                tf.expand_dims(dl2,0),
-                tf.expand_dims(dv,0)
-                ])
             return (features, grads)
             
 
@@ -131,62 +174,147 @@ class LowRankRFFnoOffset(LowRankBase):
             
         R =  self.n_components
         
-        B, A  = self.__M(bound, get_grad)
+        if self.n_features == 1 :
+            B, A  = self.__M_1D(bound, get_grad)
+        else : 
+            B, A  = self.__M_2D(bound, get_grad)
+
         cache = tf.linalg.diag(tf.ones(R,  dtype=default_float()))
         zeros = tf.zeros((R,R),  dtype=default_float())
         cache1 = tf.experimental.numpy.hstack([cache , zeros])
         cache2 = tf.experimental.numpy.hstack([zeros, cache]) 
-        
         M =  tf.transpose(cache1) @ (A + B) @ cache1 + tf.transpose(cache2) @ (A - B) @ cache2
 
         if get_grad :
-            out, dl1, dl2 = M
+
+            if self.n_features == 2 :
+                out, dl1, dl2 = M
+                dl =  tf.experimental.numpy.vstack([ tf.expand_dims(dl1,0), tf.expand_dims(dl2,0)])
+            else :
+                out, dl1= M
+                dl = tf.expand_dims(dl1,0)
+
             dv = tf.expand_dims(out /self.variance,0)
-            return (out, tf.experimental.numpy.vstack([ tf.expand_dims(dl1,0), tf.expand_dims(dl2,0), dv]))
+            return (out, tf.experimental.numpy.vstack([ dl, dv]))
         
         return M
+    
+    
+    
+    def m(self, bound = None,  get_grad = False):
+
+        if bound is None :
+            bound = self.space.bound1D
+            
+        zeros =  tf.zeros([self.n_components,1], dtype=default_float())
+            
+        if self.n_features == 1 :
+            m  = self.__m_1D(bound, get_grad)
+        else : 
+            m = self.__m_2D(bound, get_grad)
+    
+        if get_grad :
+            
+            if self.n_features == 2 :
+                m, dl1, dl2 = m
+                dl1 = tf.experimental.numpy.vstack([dl1, zeros])
+                dl2 = tf.experimental.numpy.vstack([dl2, zeros])
+                grads = tf.experimental.numpy.vstack([tf.expand_dims(dl1,0), tf.expand_dims(dl2,0)])
+            else :
+                m, dl = m
+                dl = tf.experimental.numpy.vstack([dl, zeros])
+                grads = tf.expand_dims(dl,0)
+                
+                
+            dv = 0.5 * m /self.variance
+            m = tf.experimental.numpy.vstack([m, zeros])
+            dv = tf.experimental.numpy.vstack([dv, zeros])
+            grads = tf.experimental.numpy.vstack([grads, tf.expand_dims(dv,0)])
+   
+            return (m, grads)
+            
+        return tf.experimental.numpy.vstack([m, zeros])
 
 
-    def integral(self, bound = None, get_grad = False):
+
+    def integral(self, bound = None, get_grad = False, full_output = False):
         
         if bound is None :
             bound = self.space.bound1D
             
-        B, A = self.__M(bound, get_grad )
+        if self.n_features == 1 :
+            B, A  = self.__M_1D(bound, get_grad)
+        else : 
+            B, A  = self.__M_2D(bound, get_grad)
+            
         R =  self.n_components
-        
+
         cache = tf.linalg.diag(tf.ones(R,  dtype=default_float()))
         zeros = tf.zeros((R,R),  dtype=default_float())
-
-        w1 = tf.experimental.numpy.hstack([cache , zeros]) @ self._latent
-        w2 = tf.experimental.numpy.hstack([zeros, cache]) @ self._latent
+        
+        cache1 = tf.experimental.numpy.hstack([cache , zeros])
+        cache2 = tf.experimental.numpy.hstack([zeros, cache]) 
+        w1 = cache1 @ self._latent
+        w2 = cache2 @ self._latent
         integral = tf.transpose(w1) @ (A + B) @ w1 + tf.transpose(w2) @ (A - B) @ w2
         
         add_to_out = 0.0
         sub_to_out = 0.0
-        
-        if self.hasOffset is True :
-            beta_term = 2 * self.beta0 *  tf.transpose(w1) @ self.__m(bound, get_grad)
+
+        if self.hasDrift is True :
+            
+            if self.n_features == 2 :
+                m = self.__m_2D(bound, get_grad)
+            else :
+                m = self.__m_1D(bound, get_grad)
+            
+            beta_term = 2 * self.beta0 * tf.transpose(w1) @ m
             integral += beta_term 
-            add_to_out = self.beta0**2 *self.space.measure
-            sub_to_out = beta_term[0][0] 
+            add_to_out = self.beta0**2 *self.space_measure
+            sub_to_out = beta_term[0][0]
             
         if get_grad :
-            out, dl1, dl2 = integral
+        
+            if self.n_features == 2 :
+                out, dl1, dl2 = integral
+                dl = tf.experimental.numpy.vstack([dl1, dl2])
+            else :
+                out, dl = integral
+                
             dv = (out - 0.5 * sub_to_out) /self.variance   # dtotal/dv = quad_term/variance + 0.5 beta_term/variance. 
+            grads = tf.experimental.numpy.vstack([dl, dv])
+ 
             out += add_to_out
-            grads = tf.experimental.numpy.vstack([dl1, dl2, dv])
-            return (out[0][0], grads)
-
+            out = out[0,0]
+            
+            if self.beta0.trainable is True :
+                db = beta_term[0][0] / self.beta0  + 2 * self.beta0 *self.space_measure
+                grads = tf.experimental.numpy.vstack([tf.expand_dims(db,1), grads])
+                
+            if full_output is False :
+                return (out, grads)
+        
+            M =  tf.transpose(cache1) @ (A + B) @ cache1 + tf.transpose(cache2) @ (A - B) @ cache2
+            
+            if self.n_features == 1 :
+                m_out, m_dl1, m_dl2 = M
+                m_dl = tf.experimental.numpy.vstack([ tf.expand_dims(m_dl1,0), tf.expand_dims(m_dl2,0)])
+            else :
+                m_out, m_dl = M
+                m_dl = tf.expand_dims(m_dl,0)
+                
+            m_dv = tf.expand_dims(m_out /self.variance,0)
+            M_out = (m_out, tf.experimental.numpy.vstack([ m_dl, m_dv]))
+            return ((out, grads) , M_out)
+ 
         return integral[0][0] + add_to_out
 
     
-    def __M(self, bound = [-1,1], get_grad = False):
+    def __M_2D(self, bound, get_grad = False):
         # Return the matrices B and A
         # without grad return : M = [B,A] (i.e. 2xRxR tensor)
         # with grad return : M = [[B, der1B, der2B], [A, der1A, der2A]] (i.e. 2x3xRxR tensor)
-        
-        
+
         if not self._is_fitted :
             raise ValueError("instance not fitted")
             
@@ -198,7 +326,7 @@ class LowRankRFFnoOffset(LowRankBase):
         z1 = self._random_weights[0,:]
         z2 = self._random_weights[1,:]
 
-        d1, d2 =  expamdedSumPerDimension(tf.transpose(self._random_weights))
+        d1, d2 =  expandedSum2D(tf.transpose(self._random_weights))
 
         sin_d1 = tf.sin(bound*d1) 
         sin_d2 = tf.sin(bound*d2)
@@ -209,7 +337,7 @@ class LowRankRFFnoOffset(LowRankBase):
 
         if get_grad :
 
-            if self.lengthscales.shape == [] :
+            if self.lengthscales.shape == [] or self.lengthscales.shape == 1  :
                 l1 = self.lengthscales
                 l2 = self.lengthscales
             else :
@@ -230,11 +358,50 @@ class LowRankRFFnoOffset(LowRankBase):
             return self.variance * out / R
             
         return self.variance * M / R
+    
+    
+    def __M_1D(self, bound, get_grad = False):
+        # Return the matrices B and A
+        # without grad return : M = [B,A] (i.e. 2xRxR tensor)
+        # with grad return : M = [[B, der1B, der2B], [A, der1A, der2A]] (i.e. 2x(dim + 1)xRxR tensor)
+
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+            
+        if bound[0] != -bound[1]  :
+            raise ValueError("implmentation only for symetric bounds")
+            
+        bound = bound[1]
+        R =  self.n_components 
+        z = self._random_weights[0,:]
+        
+        d =  expandedSum1D(tf.transpose(self._random_weights))
+        M = (1 / d) * tf.sin(bound*d) 
+        diag = tf.stack([(1 / (2 * z)) * tf.sin(2*bound*z) , bound * tf.ones(R,  dtype=default_float())])                                     
+        M = tf.linalg.set_diag(M, diag) 
+
+        if get_grad :
+
+            l = self.lengthscales
+            dl = - ( bound * tf.cos(bound*d) - M ) / l
+            dl =  tf.linalg.set_diag(dl, tf.stack([ - ( bound * tf.cos(2*bound*z) - diag[0,:] ) / l, tf.zeros(R,  dtype=default_float())]) ) 
+
+            out = tf.experimental.numpy.vstack([
+                tf.expand_dims( tf.experimental.numpy.vstack([tf.expand_dims(M[0,:],0), tf.expand_dims(dl[0,:],0)]),0),
+                tf.expand_dims(tf.experimental.numpy.vstack([tf.expand_dims(M[1,:],0), tf.expand_dims(dl[1,:],0)]),0)
+                ])
+
+            return self.variance * out / R
+            
+        return self.variance * M / R
  
     
     
-    def __m(self, bound = [-1,1], get_grad = False):
- 
+    def __m_2D(self, bound, get_grad = False):
+        # Return the vector m
+        # without grad return : m (i.e. (0.5*R)x1 tensor)
+        # with grad return : M = [m, der1m, der2m] (i.e. 3x(0.5*R)x1 tensor)
+
         if not self._is_fitted :
             raise ValueError("instance not fitted")
             
@@ -257,8 +424,7 @@ class LowRankRFFnoOffset(LowRankBase):
         if get_grad is True :
             
             if self.lengthscales.shape == [] :
-                l1 = self.lengthscales
-                l2 = self.lengthscales
+                l1 = l2 = self.lengthscales
             else :
                 l1 = self.lengthscales[0]
                 l2 = self.lengthscales[1]
@@ -266,7 +432,41 @@ class LowRankRFFnoOffset(LowRankBase):
             dl1 =  - ( np.expand_dims(4 * bound * tf.cos(bound*z1) * sin_z2 / z2,1) - vec ) / l1
             dl2 =  - ( np.expand_dims(4 * bound * sin_z1 * tf.cos(bound*z2) / z1,1) - vec ) / l2
             return factor * tf.experimental.numpy.vstack([tf.expand_dims(vec,0), tf.expand_dims(dl1,0), tf.expand_dims(dl2,0)])
- 
+
+        return  factor * vec
+    
+    
+    
+    def __m_1D(self, bound, get_grad = False):
+        # Return the vector m
+        # without grad return : m (i.e. (0.5*R)x1 tensor)
+        # with grad return : M = [m, der1m, der2m] (i.e. 3x(0.5*R)x1 tensor)
+
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+            
+        if bound[0] != -bound[1]  :
+            raise ValueError("implmentation only for symetric bounds")
+            
+        bound = bound[1]
+
+        R =  self.n_components
+        z = tf.transpose(self._random_weights)
+        
+        vec = 2 * tf.sin(bound*z)  / z
+        factor = tf.sqrt(tf.convert_to_tensor( self.variance/ R, dtype=default_float()))
+
+        if get_grad is True :
+            dl =  -  ( 2 * bound * tf.cos(bound*z) - vec ) / self.lengthscales
+            return factor * tf.experimental.numpy.vstack([tf.expand_dims(vec,0), tf.expand_dims(dl,0)])
+
         return  factor * vec
 
-      
+
+
+
+
+
+
+
+

@@ -1,16 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jan 15 13:36:21 2021
 
-@author: jesel
-"""
 import numpy as np
-
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
-
+from typing import List, Sequence, Union
 import tensorflow as tf
-
-
 
 
 class Space():
@@ -18,7 +9,17 @@ class Space():
         self._lower_bound =  bound[0]
         self._higher_bound = bound[1]
         
-    
+    def __mul__(self, num): 
+        self._lower_bound = self._lower_bound  * num 
+        self._higher_bound = self._higher_bound * num
+        return self
+        
+    def __rmul__(self, num): 
+        self._lower_bound = self._lower_bound  * num 
+        self._higher_bound = self._higher_bound * num
+        return self
+        
+
     @property
     def bound(self):
         return self.bound2D
@@ -30,10 +31,13 @@ class Space():
     @property
     def bound1D(self):
         return np.array((self._lower_bound,  self._higher_bound )) 
-        
-    @property
-    def measure(self):
-        return (self.__x2Max() - self.__x1Min()) * (self.__x2Max() - self.__x1Min())
+
+
+    def measure(self, dimension = 2):
+        if dimension == 2 :
+            return (self.__x2Max() - self.__x1Min()) * (self.__x2Max() - self.__x1Min())
+        else :
+            return (self.__x1Max() - self.__x1Min())
     
     @property
     def center(self):

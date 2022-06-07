@@ -1,0 +1,6 @@
+
+load(file = "D:/GitHub/point/data/src/redwoodfull.rda")
+df = data.frame(redwoodfull$x)
+df$y = redwoodfull$y
+names(df) = c("x", "y" )
+write.csv(df, "redwood.csv", row.names = FALSE)

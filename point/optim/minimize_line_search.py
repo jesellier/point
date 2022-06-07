@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Sep  5 19:58:28 2021
-
-@author: jesel
-"""
-# -*- coding: utf-8 -*-
 
 import numpy as np
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
@@ -26,7 +19,6 @@ from optimizer.minimize import minimize
 
 class OptimLineSearch :
 
-    
     def minimize(
             self,
             objective_function, 

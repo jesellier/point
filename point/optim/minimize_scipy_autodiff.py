@@ -1,9 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Sep  5 21:11:33 2021
 
-@author: jesel
-"""
 
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
 
@@ -24,7 +19,6 @@ LossClosure = Callable[[], tf.Tensor]
 
 class OptimScipyAutoDiff:
 
-    
     def minimize(
         self,
         closure : LossClosure,
@@ -106,11 +100,10 @@ class OptimScipyAutoDiff:
 
 
         def _eval(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-            loss, grad = _tf_eval(tf.convert_to_tensor(x))
+            loss, grad = _tf_eval(tf.convert_to_tensor(x))     
             return loss.numpy().astype(np.float64), grad.numpy().astype(np.float64)
 
         return _eval
-
 
 
 def _compute_loss_and_gradients(
@@ -120,6 +113,6 @@ def _compute_loss_and_gradients(
         tape.watch(variables)
         loss = loss_closure()
     grads = tape.gradient(loss, variables)
-    
+
     return loss, grads
 

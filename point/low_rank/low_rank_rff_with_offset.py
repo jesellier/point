@@ -1,11 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Apr 18 16:20:59 2021
 
-@author: jesel
-"""
 
 import numpy as np
+import copy
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
@@ -20,34 +17,84 @@ from point.misc import Space
 
 
 def expandedSum(x):
+    
     z1 = tf.expand_dims(x, 1)
     z2 = tf.expand_dims(x, 0)
-
     return (z1 + z2, z1 - z2)
 
 
 
 class LowRankRFF(LowRankBase):
     
-    def __init__(self, kernel, beta0 = 1e-10, space = Space(), n_components = 1000, random_state = None):
-       
-        super().__init__(kernel, beta0, space, n_components, random_state)
+    
+    def __init__(self, kernel, beta0 = None, space = Space(), n_components = 75, n_features = 2,  random_state = None):
         
         if not isinstance(kernel, gfk.SquaredExponential):
+            
             raise NotImplementedError(" 'kernel' must of 'gfk.SquaredExponential' type")
+            
+        if n_features == 1 and not (kernel.lengthscales.shape == [] or kernel.lengthscales.shape[0] == 1):
+            raise NotImplementedError("dimension of n_features:=" + str(n_features) + " not equal to legnscales_array_szie:=" + str(kernel.lengthscales.shape))
+
+        super().__init__(kernel, beta0, space, n_components, n_features, random_state)
+        
+        self._points_trainable = False
+        self._offset_trainable = False
+        
+        
+    def copy_initial_parameters(self):
+        lst = list(super().copy_initial_parameters())
+        lst.append(self._points_trainable)
+        lst.append(self._offset_trainable)
+        tpl = tuple(lst)
+        return copy.deepcopy(tpl)
+
+    
+    def reset_initial_parameters(self, p, sample = True):
+        super().reset_initial_parameters(p, sample = False)
+        if sample : self.sample() 
+
+        self.set_points_trainable(p[3])
+        self.set_offset_trainable(p[4])
+        self.fit(sample = False)
+
+
+    def set_points_trainable(self, trainable):
+        
+        if not self._is_fitted :
+            raise ValueError("Random Fourrier object not fitted")
+
+        if trainable is True :
+            self._points_trainable = True
+            self._offset_trainable = True
+            self._G = tf.Variable(self._G)
+            self._offset = tf.Variable(self._offset)
+        else :
+            self._points_trainable = False
+            self._offset_trainable = False
+            self._G = tf.constant(self._G)
+            self._offset = tf.constant(self._offset)
+            
+            
+    def set_offset_trainable(self, trainable):
+        if trainable is True :
+            self._offset_trainable = True
+            self._offset = tf.Variable(self._offset)
+        else :
+            self._offset_trainable = False
+            self._offset = tf.constant(self._offset)
     
     
-    def sample(self, latent_only):
+    
+    def sample(self):
         random_state = check_random_state_instance(self._random_state)
         self._latent = tf.constant(random_state.normal(size = (self.n_components, 1)), dtype=default_float(), name='latent')
-        if latent_only : return
         
         size = (self.n_features, self.n_components)
         self._G = tf.constant(random_state.normal(size = size), dtype=default_float(), name='G')
-        self._random_offset = tf.constant(random_state.uniform(0, 2 * np.pi, size=self.n_components), dtype= default_float(), name='b')
-       
+        self._offset = tf.constant(random_state.uniform(0, 2 * np.pi, size=self.n_components), dtype= default_float(), name='offset')
 
-
+        
     def fit(self, sample = True):
         
         if sample : self.sample()
@@ -62,6 +109,7 @@ class LowRankRFF(LowRankBase):
         self._random_weights =  tf.linalg.diag(tf.math.sqrt(2 * gamma))  @ self._G
         self._is_fitted = True
         return self
+    
     
     
     def feature(self, X):
@@ -80,11 +128,12 @@ class LowRankRFF(LowRankBase):
         if n_features != self.n_features :
             raise ValueError("dimension of X must be =:" + str(self.n_features ))
 
-        features = X @ self._random_weights  + self._random_offset
+        features = X @ self._random_weights  + self._offset
         features = tf.cos(features)
         features *= tf.sqrt(2 * self.variance / self.n_components)
      
         return features
+    
     
 
     def __call__(self, X, X2 = None):
@@ -99,8 +148,23 @@ class LowRankRFF(LowRankBase):
         
         if bound is None :
             bound = self.space.bound1D
+            
+        if self.n_features == 1 :
+            return self.__M_1D(bound)
         
-        return self.__M(bound)
+        return self.__M_2D(bound)
+    
+            
+    
+    def m(self, bound = None):
+        if bound is None :
+            bound = self.space.bound1D
+        
+        if self.n_features == 1 :
+            return self.__m_1D(bound)
+        
+        return self.__m_2D(bound)
+
 
 
     def integral(self, bound = None):
@@ -108,20 +172,25 @@ class LowRankRFF(LowRankBase):
         if bound is None :
             bound = self.space.bound1D
             
-        mat = self.__M(bound)
+        mat = self.M(bound)
         integral = tf.transpose(self._latent) @ mat @ self._latent
-        integral += 2 * self.beta0 *  tf.transpose(self._latent) @ self.__m(bound)
-        integral += self.beta0**2  * self.space.measure
+        
+        if self.hasDrift is True :
+            integral += 2 * self.beta0 *  tf.transpose(self._latent) @ self.m(bound)
+            integral += self.beta0**2  * self.space_measure
+            
         integral = integral[0][0]
 
         return integral
 
 
+
     def predict_f(self, Xnew):
         raise NotImplementedError
 
+      
 
-    def __M(self, bound = [0,1]):
+    def __M_2D(self, bound = [-1,1]):
 
         if not self._is_fitted :
             raise ValueError("instance not fitted")
@@ -130,7 +199,8 @@ class LowRankRFF(LowRankBase):
         lo_bound = bound[0]
 
         R =  self.n_components
-        b = self._random_offset
+        b = self._offset
+        
         z = tf.transpose(self._random_weights)        
         z0 = z[:,0]
         z1 = z[:,1]
@@ -153,10 +223,10 @@ class LowRankRFF(LowRankBase):
         M = tf.linalg.set_diag(M, diag) 
     
         return self.variance * M / R
- 
     
     
-    def __m(self, bound = [0,1]):
+    
+    def __M_1D(self, bound = [-1,1]):
 
         if not self._is_fitted :
             raise ValueError("instance not fitted")
@@ -165,7 +235,37 @@ class LowRankRFF(LowRankBase):
         lo_bound = bound[0]
 
         R =  self.n_components
-        b = self._random_offset
+        b = self._offset
+        
+        z = self._random_weights[0,:]
+        Mp, Mm = expandedSum(z)
+        d = tf.stack([Mp, tf.linalg.set_diag(Mm, tf.ones(R,  dtype=default_float())) ])
+
+        if b.shape == [] :
+            b3 = tf.reshape(tf.stack([2 * b, tf.constant(0.0, dtype=default_float())]), shape = (2,1,1))
+        else :
+            (b1, b2) = expandedSum(b)
+            b3 = tf.stack([b1, b2])
+            
+        M = tf.math.reduce_sum((1 / d) * ( tf.sin(up_bound*d + b3) - tf.sin(lo_bound*d + b3)), axis = 0)
+        diag = (1 / (2 * z)) * ( tf.sin(2 * up_bound*z + 2 * b) - tf.sin(2 *lo_bound*z + 2 * b) ) \
+                                                  +  (up_bound - lo_bound)
+        M = tf.linalg.set_diag(M, diag) 
+    
+        return self.variance * M / R
+ 
+    
+    
+    def __m_2D(self, bound = [-1,1]):
+
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+            
+        up_bound = bound[1]
+        lo_bound = bound[0]
+
+        R =  self.n_components
+        b = self._offset
         z = tf.transpose(self._random_weights)
         z0 = z[:,0]
         z1 = z[:,1]
@@ -178,51 +278,34 @@ class LowRankRFF(LowRankBase):
 
         return  vec
     
+    
+    
+    def __m_1D(self, bound = [-1,1]):
 
-        
+        if not self._is_fitted :
+            raise ValueError("instance not fitted")
+            
+        up_bound = bound[1]
+        lo_bound = bound[0]
 
-      
-if __name__ == '__main__':
+        R =  self.n_components
+        b = self._offset
 
-    import matplotlib.cm as cm
-    import gpflow
-    import matplotlib.pyplot as plt
+        z = self._random_weights[0, :]
+       
+        vec = tf.sin(up_bound*z + b) - tf.sin(lo_bound*z + b)
+                               
+        vec =  tf.linalg.diag(1 / z) @ tf.expand_dims(vec, 1)
+        vec *= tf.sqrt(tf.convert_to_tensor(2.0 * self.variance/ R, dtype=default_float()))
 
+        return  vec
     
-    rng  = np.random.RandomState(10)
-    variance = tf.Variable(5, dtype=default_float(), name='sig')
-    length_scale = tf.Variable(0.5, dtype=default_float(), name='lenght_scale')
-    kernel = gpflow.kernels.SquaredExponential(lengthscales= 0.5, variance= 1)
-    
-    n_features = 2
-    X = tf.constant(rng.normal(size = [1000, n_features]), dtype=default_float())
-    
-    shuffled_idx = np.arange(1000)
-    rng.shuffle(shuffled_idx)
-    shuffled_idx = shuffled_idx[- 10 :]
-    Z = tf.gather(X, tf.constant(shuffled_idx))
 
-    lrk = LowRankRFF(kernel, n_components = 75, random_state= rng).fit()
-    
-    up_bound = 1
-    lo_bound = -1
 
-    R =  lrk.n_components
-    b   = lrk._random_offset
-    z = tf.transpose(lrk._random_weights)   
-    
-    # plt.figure(figsize=(10, 6))
-    # plt.subplot(1, 2, 1)
-    # plt.imshow(kernel(X))
-    # plt.subplot(1, 2, 2)
-    # plt.imshow(lrk(X))
-    
-    # #plt.subplots_adjust(bottom=0.1, right=0.8, top=0.9)
-    # cax = plt.axes([1, 0.25, 0.05, 0.5])
-    # plt.colorbar(cax=cax)
-    # plt.show()
-    
-    
+
+
+
+
 
     
 

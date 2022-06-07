@@ -1,9 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Sep  5 21:11:33 2021
 
-@author: jesel
-"""
 
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
 
@@ -20,6 +15,16 @@ StepCallback = Union[Callable[[int, Sequence[tf.Variable], Sequence[tf.Tensor]],
 LossClosure = Callable[[], tf.Tensor]
 
 
+############## default tol
+#L-BFGS-B
+#ftol=2.2204460492503131e-09
+#gtol=1e-5
+
+#'Newton-CG'
+#ftol=2.2204460492503131e-09
+#gtol=1e-5
+
+
 class OptimScipy:
 
     
@@ -28,6 +33,7 @@ class OptimScipy:
         closure : LossClosure,
         variables: Sequence[tf.Variable],
         method: Optional[str] = "L-BFGS-B",
+        hess_closure = None,
         **scipy_kwargs,
     ) -> OptimizeResult:
         """
@@ -60,10 +66,14 @@ class OptimScipy:
 
         self.__check_entries(closure, variables)
         
-        func = self.eval_func(closure, variables)
+        _eval_func = self.eval_func(closure, variables)
         initial_params = self.initial_parameters(variables)
-
-        return scipy.optimize.minimize(func, initial_params, jac=True, method=method, **scipy_kwargs)
+        
+        if hess_closure is None :
+            return scipy.optimize.minimize(fun = _eval_func, x0 = initial_params, jac=True, method=method, **scipy_kwargs)
+        else :
+            _eval_hess = self.eval_hess(hess_closure)
+            return scipy.optimize.minimize(fun = _eval_func, x0 = initial_params, jac=True, hess = _eval_hess, method=method, **scipy_kwargs)
     
    
     
@@ -106,13 +116,26 @@ class OptimScipy:
                 return loss,  TensorMisc().pack_tensors(grads)
         else :
              def _tf_eval(x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+                if len(x.shape) == 2 : x = x[0]
                 variables.assign(tf.expand_dims(x,1))
                 loss, grads = closure()
                 return loss,  grads  
 
         def _eval(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
             loss, grad = _tf_eval(tf.convert_to_tensor(x))
+            if len(grad.shape) == 2 : grad = grad[:,0]
             return loss.numpy().astype(np.float64), grad.numpy().astype(np.float64)
+
+        return _eval
+    
+    
+    @classmethod
+    def eval_hess(
+        cls, closure: LossClosure) -> Callable:
+
+        def _eval(x: np.ndarray):
+            #hess = closure()
+            return closure().numpy().astype(np.float64)
 
         return _eval
 
